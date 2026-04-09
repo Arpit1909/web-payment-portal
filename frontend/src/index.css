@@ -112,7 +112,7 @@ body {
 /* Cover Image */
 .sp-cover {
   width: 100%;
-  flex: 0 0 38%;
+  flex: 0 0 28%;
   background-size: cover;
   background-position: center 20%;
   background-repeat: no-repeat;
@@ -301,7 +301,7 @@ body {
   background: linear-gradient(135deg, rgba(236,72,153,0.1) 0%, rgba(219,39,119,0.06) 100%);
   border: 1px solid rgba(236,72,153,0.18);
   border-radius: var(--radius-md);
-  padding: 0.7rem 0.9rem;
+  padding: 0.5rem 0.75rem;
 }
 
 .sp-timer-left {

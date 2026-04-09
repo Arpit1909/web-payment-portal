@@ -21,7 +21,7 @@ const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin@example.com';
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 
 // Middleware
-app.use(cors({ origin: FRONTEND_URL, credentials: true }));
+app.use(cors({ origin: [FRONTEND_URL, `http://localhost:${PORT}`], credentials: true }));
 app.use(express.json());
 
 if (!fs.existsSync('uploads')) {
@@ -479,9 +479,20 @@ cron.schedule('0 * * * *', () => {
     );
 });
 
+// --- SERVE FRONTEND (Production) ---
+// Serve the built React frontend from ../frontend/dist
+const frontendPath = path.join(__dirname, '..', 'frontend', 'dist');
+app.use(express.static(frontendPath));
+
+// SPA fallback — any route not matching an API or static file serves index.html
+app.get('*', (req, res) => {
+    res.sendFile(path.join(frontendPath, 'index.html'));
+});
+
 // Start Server
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
+    console.log(`Frontend served from ${frontendPath}`);
     console.log(`Subscription expiry check runs every hour`);
     pollUpdates();
 });

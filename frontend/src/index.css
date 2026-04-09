@@ -196,7 +196,7 @@ body {
   overflow: hidden;
   position: relative;
   z-index: 2;
-  margin-top: -2rem;
+  margin-top: -2.6rem;
 }
 
 /* Profile Section */
@@ -207,15 +207,14 @@ body {
 }
 
 .sp-avatar-wrap {
-  width: 64px;
-  height: 64px;
+  width: 56px;
+  height: 56px;
   border-radius: 50%;
-  padding: 3px;
+  padding: 2px;
   background: var(--gold-gradient);
   position: relative;
   flex-shrink: 0;
   box-shadow: 0 4px 16px var(--gold-glow);
-  margin-top: -24px; /* Nudged more upside so it strongly overlaps */
 }
 
 .sp-avatar {
@@ -317,7 +316,6 @@ body {
 .sp-timer-icon {
   color: #ef4444;
   flex-shrink: 0;
-  animation: textPulse 2s infinite ease-in-out;
 }
 
 .sp-timer-label {
@@ -594,12 +592,12 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   margin-bottom: 0.2rem;
-  background: linear-gradient(90deg, #ff3b30, #ff9500, #ffcc00, #4cd964, #5ac8fa, #007aff, #ff3b30);
+  background: linear-gradient(90deg, #ff0055, #ffaa00, #ff0055, #ffaa00, #ff0055);
   background-size: 300% 100%;
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
-  animation: colorfulFlow 3s linear infinite, textPulse 2s infinite ease-in-out;
+  animation: colorfulFlow 3s linear infinite;
 }
 
 .sp-cta-price {
@@ -1513,7 +1511,3 @@ textarea.input-elegant {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
-
-.btn-gold {
-  animation: textPulse 2s infinite ease-in-out;
-}

@@ -112,7 +112,8 @@ body {
 /* Cover Image */
 .sp-cover {
   width: 100%;
-  flex: 0 0 28%;
+  flex: none;
+  aspect-ratio: 19 / 9;
   background-size: cover;
   background-position: top center;
   background-repeat: no-repeat;

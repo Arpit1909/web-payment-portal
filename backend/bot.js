@@ -80,6 +80,44 @@ async function handleNewChatMember(update) {
     }
 }
 
+async function handleSupportTicket(message) {
+    if (message.chat.type !== 'private') return; // only DM
+    const userId = message.from.id;
+
+    if (isAdmin(userId)) {
+        // Allow admin to reply
+        if (message.reply_to_message && message.reply_to_message.text) {
+            const ticketMatch = message.reply_to_message.text.match(/\[Ticket UserID: (\d+)\]/);
+            if (ticketMatch) {
+                const targetUserId = ticketMatch[1];
+                try {
+                    await callTelegramAPI('copyMessage', {
+                        chat_id: targetUserId,
+                        from_chat_id: message.chat.id,
+                        message_id: message.message_id
+                    });
+                    await sendMessage(message.chat.id, `✅ Reply secretly sent to User ${targetUserId}`);
+                } catch(e) {
+                    await sendMessage(message.chat.id, `❌ Failed to send reply: ${e.message}`);
+                }
+            }
+        }
+        return; 
+    }
+
+    // Normal user creates ticket
+    for (const adminId of ADMIN_IDS) {
+        try {
+            await sendMessage(adminId, `📩 <b>Support Ticket from @${message.from.username || message.from.first_name}</b>\n[Ticket UserID: ${userId}]\n\n<i>Swipe right on the message below to reply to them anonymously.</i>`);
+            await callTelegramAPI('copyMessage', {
+                chat_id: adminId,
+                from_chat_id: message.chat.id,
+                message_id: message.message_id
+            });
+        } catch(e) {}
+    }
+}
+
 async function handleCommand(message) {
     const chatId = message.chat.id;
     const userId = message.from.id;
@@ -88,8 +126,9 @@ async function handleCommand(message) {
     if (!isAdmin(userId)) {
         if (text === '/start') {
             await sendMessage(chatId,
-                '👋 Welcome! This bot manages subscriptions for the private channel.\n\n' +
-                'After you pay on the website, you\'ll get a link to join the channel automatically.'
+                '👋 Welcome! This bot manages subscriptions for the VIP channel.\n\n' +
+                'If you have fully paid on the website, you will automatically be approved when you click the invite link.\n\n' +
+                '📞 <b>Need Help?</b> Just reply in this chat and an admin will assist you directly!'
             );
         } else if (text === '/status') {
             const { data: sub } = await supabase.from('prachi_subscriptions')
@@ -211,13 +250,63 @@ async function handleCommand(message) {
         await sendMessage(chatId, `✅ Kicked & cancelled: ${sub.telegram_username || sub.phone || sub.id}`);
     }
 
+    else if (text.startsWith('/broadcast')) {
+        let msgToBroadcast = text.replace('/broadcast', '').trim();
+        let fromChatId = chatId;
+        let messageIdToCopy = null;
+
+        if (message.reply_to_message) {
+            messageIdToCopy = message.reply_to_message.message_id;
+        }
+
+        if (!msgToBroadcast && !messageIdToCopy) {
+            await sendMessage(chatId, '❌ Please either type `/broadcast Your message` or reply to a message with `/broadcast`');
+            return;
+        }
+
+        const { data: subs } = await supabase.from('prachi_subscriptions')
+            .select('telegram_user_id')
+            .eq('status', 'active')
+            .gt('expires_at', now)
+            .not('telegram_user_id', 'is', null);
+
+        if (!subs || subs.length === 0) {
+            await sendMessage(chatId, '❌ No active subscribers with connected telegram accounts found.');
+            return;
+        }
+
+        await sendMessage(chatId, `⏳ Broadcasting to ${subs.length} active users...`);
+        let success = 0, fail = 0;
+
+        for (const s of subs) {
+            try {
+                if (messageIdToCopy) {
+                    await callTelegramAPI('copyMessage', {
+                        chat_id: s.telegram_user_id,
+                        from_chat_id: fromChatId,
+                        message_id: messageIdToCopy
+                    });
+                } else {
+                    await sendMessage(s.telegram_user_id, msgToBroadcast);
+                }
+                success++;
+            } catch (e) {
+                fail++;
+            }
+            await new Promise(r => setTimeout(r, 50)); 
+        }
+
+        await sendMessage(chatId, `✅ <b>Broadcast Complete!</b>\nSuccess: ${success}\nFailed: ${fail}`);
+    }
+
     else if (text === '/help') {
         await sendMessage(chatId,
             `🤖 <b>Admin Commands</b>\n\n` +
             `/subscribers — List active subscribers\n` +
             `/expired — List expired/cancelled subs\n` +
             `/stats — Subscription statistics\n` +
-            `/kick &lt;username/phone/id&gt; — Kick & cancel user\n` +
+            `/broadcast <message> — Send DM to all active subs\n` +
+            `/kick <username/phone/id> — Kick & cancel user\n` +
             `/help — Show this message`
         );
     }
@@ -262,6 +351,8 @@ async function pollUpdates() {
                             }
                             if (update.message.text && update.message.text.startsWith('/')) {
                                 await handleCommand(update.message);
+                            } else {
+                                await handleSupportTicket(update.message);
                             }
                         }
                     } catch (e) {

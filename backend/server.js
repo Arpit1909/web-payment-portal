@@ -422,40 +422,55 @@ app.get('/api/admin/subscriptions/stats', verifyToken, async (req, res) => {
     res.json(stats);
 });
 
-// --- CRON: Check expired subscriptions every hour ---
+// --- CRON: Check expired and expiring subscriptions every hour ---
 cron.schedule('0 * * * *', async () => {
-    console.log('[CRON] Checking expired subscriptions...');
+    console.log('[CRON] Checking expiring subscriptions...');
     const now = new Date().toISOString();
 
-    const { data: expiredSubs, error } = await supabase
+    // 1. Kick Expired Users
+    const { data: expiredSubs } = await supabase
         .from('prachi_subscriptions')
         .select('*')
         .eq('status', 'active')
         .lte('expires_at', now);
 
-    if (error) return console.error('[CRON] DB error:', error.message);
-    if (!expiredSubs || expiredSubs.length === 0) return;
-
-    console.log(`[CRON] Found ${expiredSubs.length} expired subscriptions`);
-
-    for (const sub of expiredSubs) {
-        if (sub.telegram_user_id && process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHANNEL_ID) {
-            try {
-                await telegram.kickUser(sub.telegram_user_id);
-                console.log(`[CRON] Kicked user ${sub.telegram_username || sub.telegram_user_id}`);
-            } catch (e) {
-                console.error(`[CRON] Kick failed for ${sub.telegram_user_id}:`, e.message);
+    if (expiredSubs && expiredSubs.length > 0) {
+        for (const sub of expiredSubs) {
+            if (sub.telegram_user_id && process.env.TELEGRAM_BOT_TOKEN) {
+                try { await telegram.kickUser(sub.telegram_user_id); } catch (_) {}
+                try { await telegram.sendMessage(sub.telegram_user_id, '⚠️ Your monthly subscription has expired.\n\n🔒 Your access to the private channel has been removed.\n\n💳 Renew now to continue enjoying exclusive content!'); } catch (_) {}
             }
-
-            try {
-                await telegram.sendMessage(sub.telegram_user_id,
-                    '⚠️ Your monthly subscription has expired.\n\n🔒 Your access to the private channel has been removed.\n\n💳 Renew now to continue enjoying exclusive content!'
-                );
-            } catch (_) {}
+            await supabase.from('prachi_subscriptions').update({ status: 'expired', kicked_at: now }).eq('id', sub.id);
         }
-
-        await supabase.from('prachi_subscriptions').update({ status: 'expired', kicked_at: now }).eq('id', sub.id);
     }
+
+    // Helper to find subs expiring in exactly X hours natively
+    const notifySubs = async (hoursAway, messageText) => {
+        const startWindow = new Date(Date.now() + (hoursAway - 1) * 60 * 60 * 1000).toISOString();
+        const endWindow = new Date(Date.now() + hoursAway * 60 * 60 * 1000).toISOString();
+        
+        const { data: expiringSubs } = await supabase
+            .from('prachi_subscriptions')
+            .select('*')
+            .eq('status', 'active')
+            .gte('expires_at', startWindow)
+            .lte('expires_at', endWindow)
+            .not('telegram_user_id', 'is', null);
+
+        if (expiringSubs && expiringSubs.length > 0) {
+            for (const sub of expiringSubs) {
+                try {
+                    await telegram.sendMessage(sub.telegram_user_id, messageText);
+                } catch (_) {}
+            }
+        }
+    };
+
+    // 2. Send 3-Day Reminders (72 hours)
+    await notifySubs(72, "🔔 <b>Subscription Reminder</b>\n\nYour VIP access expires in exactly <b>3 Days</b>!\n\nPlease renew on the website soon to avoid losing access to the private channel.");
+    
+    // 3. Send 1-Day Reminders (24 hours)  
+    await notifySubs(24, "🚨 <b>Final Reminder!</b>\n\nYour VIP access expires in <b>24 Hours</b>!\n\nRenew your subscription right now to ensure uninterrupted access to the channel!");
 });
 
 // --- SERVE FRONTEND (Production) ---

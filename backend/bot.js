@@ -78,6 +78,20 @@ async function handleNewChatMember(update) {
         }
         console.log(`[BOT] Verified user joined: ${username || userId} (sub #${sub.id})`);
     }
+
+    // --- SEND WELCOME MESSAGE ---
+    try {
+        const welcomeText = `🎉 \b\bWelcome to the Exclusive VIP Channel!\b\b\n\n` +
+            `Thank you for subscribing. We're thrilled to have you here.\n\n` +
+            `📌 \b\bImportant Rules:\b\b\n` +
+            `• No screenshots or screen recording allowed.\n` +
+            `• Please respect the privacy of all content.\n\n` +
+            `\iEnjoy the exclusive updates, and feel free to reply directly to this bot if you ever need support!\i`;
+            
+        await sendMessage(userId, welcomeText.replace(/\b\b/g, '<b>').replace(/\i/g, '<i>').replace(/\i/g, '</i>'));
+    } catch (e) {
+        console.error(`[BOT] Failed to send welcome message to ${userId}:`, e.message);
+    }
 }
 
 async function handleSupportTicket(message) {
@@ -125,10 +139,18 @@ async function handleCommand(message) {
 
     if (!isAdmin(userId)) {
         if (text === '/start') {
+            const frontendUrl = process.env.FRONTEND_URL || 'https://yourwebsite.com';
             await sendMessage(chatId,
-                '👋 Welcome! This bot manages subscriptions for the VIP channel.\n\n' +
-                'If you have fully paid on the website, you will automatically be approved when you click the invite link.\n\n' +
-                '📞 <b>Need Help?</b> Just reply in this chat and an admin will assist you directly!'
+                '👋 <b>Welcome!</b>\n\nThis bot manages subscriptions for the VIP channel.\n\n' +
+                'Click a button below to check your status, or contact an admin if you need help!',
+                {
+                    inline_keyboard: [
+                        [{ text: '📱 Check Subscription Status', callback_data: 'check_status' }],
+                        [{ text: '🔥 Top VIP Content', callback_data: 'top_content' }],
+                        [{ text: '💳 Renew Subscription', url: frontendUrl }],
+                        [{ text: '🙋‍♀️ Contact Support', callback_data: 'contact_support' }]
+                    ]
+                }
             );
         } else if (text === '/status') {
             const { data: sub } = await supabase.from('prachi_subscriptions')
@@ -312,6 +334,56 @@ async function handleCommand(message) {
     }
 }
 
+async function handleCallbackQuery(callbackQuery) {
+    const data = callbackQuery.data;
+    const message = callbackQuery.message;
+    const chatId = message.chat.id;
+    const userId = callbackQuery.from.id;
+
+    // Acknowledge the callback query so the loading spinner stops
+    callTelegramAPI('answerCallbackQuery', { callback_query_id: callbackQuery.id }).catch(()=>{});
+
+    if (data === 'check_status') {
+        const { data: sub } = await supabase.from('prachi_subscriptions')
+            .select('*')
+            .eq('telegram_user_id', String(userId))
+            .eq('status', 'active')
+            .order('id', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+            
+        if (sub) {
+            const expires = new Date(sub.expires_at);
+            const daysLeft = Math.max(0, Math.ceil((expires - Date.now()) / (1000 * 60 * 60 * 24)));
+            await sendMessage(chatId,
+                `✅ <b>Active Subscription Found</b>\n\n` +
+                `📅 Expires: ${expires.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}\n` +
+                `⏳ Days left: <b>${daysLeft}</b>`
+            );
+        } else {
+            const frontendUrl = process.env.FRONTEND_URL || 'https://yourwebsite.com';
+            await sendMessage(chatId,
+                '❌ No active subscription found on this account.\n\nIf you believe this is an error, use the Contact Support button. Otherwise, grab your subscription from the website below!',
+                { inline_keyboard: [[{ text: '🛒 Open Website', url: frontendUrl }]] }
+            );
+        }
+    } else if (data === 'contact_support') {
+        await sendMessage(chatId, '📩 Please type your question or request below. An admin will reply to you as soon as possible!');
+    } else if (data === 'top_content') {
+        const channelInvite = process.env.TELEGRAM_CHANNEL_URL || 'https://t.me/c/YOUR_VIP_CHANNEL';
+        await sendMessage(chatId, 
+            "🔥 <b>Must-Watch VIP Content</b>\n\n" +
+            "Here are the most highly-rated exclusive videos from the vault. Enjoy!\n\n" +
+            `1️⃣ <a href='${channelInvite}'>Red Dress Exclusive</a>\n` +
+            `2️⃣ <a href='${channelInvite}'>Behind The Scenes Vlog</a>\n` +
+            `3️⃣ <a href='${channelInvite}'>Private Q&A Session</a>\n\n` +
+            "<i>(Note: You must be an active subscriber to view these links!)</i>"
+        );
+    } else if (data === 'rate_5' || data === 'rate_3') {
+        await sendMessage(chatId, "Thank you so much! 💖\n\nCould you write a quick 1-sentence review here in the chat? We'd love to share your feedback anonymously on our website.\n\nJust type it below and we will receive it:");
+    }
+}
+
 async function pollUpdates() {
     if (!BOT_TOKEN || BOT_TOKEN === 'your_telegram_bot_token_here') {
         console.log('[BOT] Telegram bot disabled (no token configured)');
@@ -334,7 +406,7 @@ async function pollUpdates() {
             const result = await callTelegramAPI('getUpdates', {
                 offset: lastUpdateId + 1,
                 timeout: 30,
-                allowed_updates: ['message', 'chat_member']
+                allowed_updates: ['message', 'chat_member', 'callback_query']
             });
 
             if (result.ok && result.result && result.result.length > 0) {
@@ -354,6 +426,9 @@ async function pollUpdates() {
                             } else {
                                 await handleSupportTicket(update.message);
                             }
+                        }
+                        if (update.callback_query) {
+                            await handleCallbackQuery(update.callback_query);
                         }
                     } catch (e) {
                         console.error('[BOT] Error processing update:', e.message);

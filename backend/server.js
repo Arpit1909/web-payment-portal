@@ -9,7 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const cron = require('node-cron');
 const telegram = require('./telegram');
-const instamojo = require('./instamojo');
+const instantpay = require('./instantpay');
 const { pollUpdates } = require('./bot');
 
 dotenv.config();
@@ -66,7 +66,7 @@ app.get('/api/public/data', async (req, res) => {
     }
 });
 
-// 2. Instamojo — Create a payment request
+// 2. InstantPay — Create a payment request
 const BACKEND_URL = process.env.BACKEND_URL || `http://localhost:${PORT}`;
 
 app.post('/api/payment/create', async (req, res) => {
@@ -82,7 +82,7 @@ app.post('/api/payment/create', async (req, res) => {
 
         const amount = offer ? offer.discounted_price : 199;
 
-        const paymentRequest = await instamojo.createPaymentRequest({
+        const paymentRequest = await instantpay.createPaymentRequest({
             amount,
             purpose: 'Monthly Exclusive Content Subscription',
             buyerName: buyerName || '',
@@ -107,12 +107,12 @@ app.post('/api/payment/create', async (req, res) => {
             payment_request_id: paymentRequest.id
         });
     } catch (e) {
-        console.error('Instamojo create error:', e.message);
+        console.error('InstantPay create error:', e.message);
         res.status(500).json({ error: 'Payment gateway error. Please try again.' });
     }
 });
 
-// 2b. Instamojo — Webhook (server-to-server callback after payment)
+// 2b. InstantPay — Webhook (server-to-server callback after payment)
 app.post('/api/payment/webhook', (req, res) => {
     const { payment_request_id, payment_id, status } = req.body;
 
@@ -148,12 +148,12 @@ app.post('/api/payment/webhook', (req, res) => {
     res.status(200).send('OK');
 });
 
-// 2c. Instamojo — Verify payment from frontend after redirect
+// 2c. InstantPay — Verify payment from frontend after redirect
 app.get('/api/payment/verify/:paymentRequestId/:paymentId', async (req, res) => {
     const { paymentRequestId, paymentId } = req.params;
 
     try {
-        const result = await instamojo.verifyPayment(paymentRequestId, paymentId);
+        const result = await instantpay.verifyPayment(paymentRequestId, paymentId);
 
         if (!result.verified) {
             return res.json({ success: false, reason: result.reason });
@@ -349,6 +349,32 @@ app.delete('/api/admin/previews/:id', verifyToken, async (req, res) => {
     res.json({ success: true });
 });
 
+// Mass Broadcast
+app.post('/api/admin/broadcast', verifyToken, async (req, res) => {
+    const { messageText } = req.body;
+    if (!messageText) return res.status(400).json({ error: 'Message text is required' });
+
+    const { data: subs, error } = await supabase
+        .from('prachi_subscriptions')
+        .select('telegram_user_id')
+        .eq('status', 'active')
+        .not('telegram_user_id', 'is', null);
+
+    if (error) return res.status(500).json({ error: error.message });
+
+    let sentCount = 0;
+    for (const sub of subs) {
+        try {
+            await telegram.sendMessage(sub.telegram_user_id, messageText);
+            sentCount++;
+        } catch (err) {
+            console.error('[Broadcast] Failed for', sub.telegram_user_id, err.message);
+        }
+    }
+
+    res.json({ success: true, sentCount, totalActive: subs.length });
+});
+
 // --- SUBSCRIPTION MANAGEMENT (Admin) ---
 
 // List all subscriptions
@@ -448,7 +474,7 @@ cron.schedule('0 * * * *', async () => {
     }
 
     // Helper to find subs expiring in exactly X hours natively
-    const notifySubs = async (hoursAway, messageText) => {
+    const notifySubs = async (hoursAway, messageText, replyMarkup = null) => {
         const startWindow = new Date(Date.now() + (hoursAway - 1) * 60 * 60 * 1000).toISOString();
         const endWindow = new Date(Date.now() + hoursAway * 60 * 60 * 1000).toISOString();
         
@@ -463,17 +489,49 @@ cron.schedule('0 * * * *', async () => {
         if (expiringSubs && expiringSubs.length > 0) {
             for (const sub of expiringSubs) {
                 try {
-                    await telegram.sendMessage(sub.telegram_user_id, messageText);
+                    await telegram.sendMessage(sub.telegram_user_id, messageText, replyMarkup);
                 } catch (_) {}
             }
         }
     };
 
+    const frontendUrl = process.env.FRONTEND_URL || 'https://yourwebsite.com';
+    const renewKeyboard = { inline_keyboard: [[{ text: '💳 Renew Subscription Now', url: frontendUrl }]] };
+
     // 2. Send 3-Day Reminders (72 hours)
-    await notifySubs(72, "🔔 <b>Subscription Reminder</b>\n\nYour VIP access expires in exactly <b>3 Days</b>!\n\nPlease renew on the website soon to avoid losing access to the private channel.");
+    await notifySubs(72, "🔔 <b>Subscription Reminder</b>\n\nYour VIP access expires in exactly <b>3 Days</b>!\n\nPlease renew on the website soon to avoid losing access.", renewKeyboard);
     
     // 3. Send 1-Day Reminders (24 hours)  
-    await notifySubs(24, "🚨 <b>Final Reminder!</b>\n\nYour VIP access expires in <b>24 Hours</b>!\n\nRenew your subscription right now to ensure uninterrupted access to the channel!");
+    await notifySubs(24, "🚨 <b>Final Reminder!</b>\n\nYour VIP access expires in <b>24 Hours</b>!\n\nRenew your subscription right now to ensure uninterrupted access to the channel!", renewKeyboard);
+
+    // 4. Testimonial Collection (7 days post signup)
+    // Find users whose started_at was exactly 7 days ago
+    const testStartWindow = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000 - 1 * 60 * 60 * 1000).toISOString();
+    const testEndWindow = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+    const { data: testimonialSubs } = await supabase
+        .from('prachi_subscriptions')
+        .select('*')
+        .eq('status', 'active')
+        .gte('started_at', testStartWindow)
+        .lte('started_at', testEndWindow)
+        .not('telegram_user_id', 'is', null);
+
+    if (testimonialSubs && testimonialSubs.length > 0) {
+        for (const sub of testimonialSubs) {
+            try {
+                await telegram.sendMessage(sub.telegram_user_id, 
+                    "👋 Hi! You've been in the VIP group for a week now.\n\nAre you enjoying the exclusive videos and photos?",
+                    {
+                        inline_keyboard: [
+                            [{ text: '⭐⭐⭐⭐⭐ (Love it!)', callback_data: 'rate_5' }],
+                            [{ text: 'It is okay', callback_data: 'rate_3' }]
+                        ]
+                    }
+                );
+            } catch (_) {}
+        }
+    }
 });
 
 // --- SERVE FRONTEND (Production) ---

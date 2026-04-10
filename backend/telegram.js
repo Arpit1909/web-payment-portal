@@ -65,12 +65,16 @@ async function createInviteLink(expireSeconds = 86400) {
     });
 }
 
-async function sendMessage(chatId, text) {
-    return callTelegramAPI('sendMessage', {
+async function sendMessage(chatId, text, replyMarkup = null) {
+    const data = {
         chat_id: chatId,
         text,
         parse_mode: 'HTML'
-    });
+    };
+    if (replyMarkup) {
+        data.reply_markup = replyMarkup;
+    }
+    return callTelegramAPI('sendMessage', data);
 }
 
 module.exports = {

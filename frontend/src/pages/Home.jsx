@@ -549,7 +549,7 @@ export default function Home() {
 
                             <p className="security-note">
                                 <ShieldCheck size={13} color="#22D47A" />
-                                Secured by Instamojo • 100% safe payment
+                                Secured by InstantPay • 100% safe payment
                             </p>
                         </div>
                         )}

@@ -4,7 +4,7 @@ import {
     Settings, LogOut, LayoutDashboard, Image as ImageIcon,
     Upload, Trash2, Tag, Type, Lock, CheckCircle2,
     AlertCircle, Crown, Users, Video, DollarSign,
-    Globe, MessageSquare, User, Camera, Clock
+    Globe, MessageSquare, User, Camera, Clock, Send, BarChart2
 } from 'lucide-react';
 
 /* ===========================
@@ -80,7 +80,11 @@ export default function Admin() {
     const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
     const [notification, setNotification] = useState(null);
-    const [activeTab, setActiveTab] = useState('profile');
+    const [activeTab, setActiveTab] = useState('dashboard');
+    
+    // Broadcast State
+    const [broadcastMsg, setBroadcastMsg] = useState('');
+    const [broadcastLoading, setBroadcastLoading] = useState(false);
 
     const [offerData, setOfferData] = useState({
         original_price: 899,
@@ -177,6 +181,30 @@ export default function Admin() {
             showNotify('Failed to cancel', 'error');
         }
         setLoading(false);
+    };
+
+    const handleBroadcast = async () => {
+        if (!broadcastMsg.trim()) return showNotify('Message cannot be empty', 'error');
+        if (!window.confirm('Are you absolutely sure? This will instantly DM ALL active subscribers.')) return;
+        
+        setBroadcastLoading(true);
+        try {
+            const res = await fetch(`${API_BASE}/api/admin/broadcast`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ messageText: broadcastMsg })
+            });
+            const data = await res.json();
+            if (data.success) {
+                showNotify(`Broadcast sent successfully to ${data.sentCount} users!`);
+                setBroadcastMsg('');
+            } else {
+                showNotify(data.error || 'Broadcast failed', 'error');
+            }
+        } catch {
+            showNotify('Network error during broadcast', 'error');
+        }
+        setBroadcastLoading(false);
     };
 
     const handleReactivateSub = async (id) => {
@@ -414,12 +442,18 @@ export default function Admin() {
 
     /* ===== NAV CONFIG ===== */
     const navItems = [
+        { id: 'dashboard', label: 'Command Center', icon: <LayoutDashboard size={17} /> },
         { id: 'profile', label: 'Profile & Setup', icon: <User size={17} /> },
         { id: 'content', label: 'Page Content', icon: <Type size={17} /> },
         { id: 'pricing', label: 'Pricing & Timer', icon: <Tag size={17} /> },
         { id: 'gallery', label: 'Media Gallery', icon: <ImageIcon size={17} /> },
-        { id: 'subscriptions', label: 'Subscriptions', icon: <Crown size={17} /> },
+        { id: 'subscriptions', label: 'Subscriptions', icon: <Users size={17} /> },
     ];
+
+    // Compute Metrics
+    const activeSubs = subscriptions.filter(s => s.status === 'active' && new Date(s.expires_at) > new Date());
+    const mrr = activeSubs.reduce((sum, s) => sum + (Number(s.amount) || 0), 0);
+    const totalRevenue = subscriptions.reduce((sum, s) => sum + (Number(s.amount) || 0), 0);
 
     /* ===== DASHBOARD ===== */
     return (
@@ -469,6 +503,73 @@ export default function Admin() {
 
             {/* ===== MAIN CONTENT ===== */}
             <div className="admin-content">
+
+                {/* ── Command Center Dashboard ── */}
+                {activeTab === 'dashboard' && (
+                    <>
+                        <div className="admin-page-header">
+                            <div>
+                                <h1 className="admin-page-title">Command Center</h1>
+                                <p className="admin-page-subtitle">Welcome back. Here is your platform overview.</p>
+                            </div>
+                        </div>
+
+                        {/* Revenue Metrics */}
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '2rem' }}>
+                            <div style={{ background: 'linear-gradient(145deg, rgba(34,212,122,0.1) 0%, rgba(34,212,122,0.02) 100%)', border: '1px solid rgba(34,212,122,0.2)', padding: '1.5rem', borderRadius: '16px' }}>
+                                <div style={{ color: 'var(--green)', display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', fontSize: '0.9rem', fontWeight: 600 }}>
+                                    <BarChart2 size={18} /> MRR (Monthly)
+                                </div>
+                                <h2 style={{ fontSize: '2.5rem', fontWeight: 900, color: '#fff', margin: 0 }}>₹{mrr.toLocaleString()}</h2>
+                                <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: '0.5rem' }}>From {activeSubs.length} active subscribers</p>
+                            </div>
+                            
+                            <div style={{ background: 'linear-gradient(145deg, rgba(245,200,66,0.1) 0%, rgba(245,200,66,0.02) 100%)', border: '1px solid rgba(245,200,66,0.2)', padding: '1.5rem', borderRadius: '16px' }}>
+                                <div style={{ color: 'var(--gold)', display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', fontSize: '0.9rem', fontWeight: 600 }}>
+                                    <DollarSign size={18} /> Total Revenue
+                                </div>
+                                <h2 style={{ fontSize: '2.5rem', fontWeight: 900, color: '#fff', margin: 0 }}>₹{totalRevenue.toLocaleString()}</h2>
+                                <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: '0.5rem' }}>Lifetime gross volume</p>
+                            </div>
+
+                            <div style={{ background: 'linear-gradient(145deg, rgba(168,85,247,0.1) 0%, rgba(168,85,247,0.02) 100%)', border: '1px solid rgba(168,85,247,0.2)', padding: '1.5rem', borderRadius: '16px' }}>
+                                <div style={{ color: 'var(--purple)', display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', fontSize: '0.9rem', fontWeight: 600 }}>
+                                    <Users size={18} /> Audience Retention
+                                </div>
+                                <h2 style={{ fontSize: '2.5rem', fontWeight: 900, color: '#fff', margin: 0 }}>{subStats.total > 0 ? Math.round((activeSubs.length / subStats.total) * 100) : 0}%</h2>
+                                <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: '0.5rem' }}>{subStats.cancelled} cancelled historically</p>
+                            </div>
+                        </div>
+
+                        {/* God-Mode Broadcast Tool */}
+                        <SectionCard
+                            title={<span style={{ color: 'var(--rose)' }}>GOD MODE: Mass Telegram Broadcast</span>}
+                            icon={<Send size={18} color="var(--rose)" />}
+                        >
+                            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem', lineHeight: 1.5 }}>
+                                Type a message below to instantly DM all <b>{activeSubs.length} active subscribers</b> via your Telegram bot. Ideal for high-urgency upsells, exclusive drops, and announcements.
+                            </p>
+                            <textarea
+                                className="input-elegant"
+                                rows={4}
+                                value={broadcastMsg}
+                                onChange={e => setBroadcastMsg(e.target.value)}
+                                placeholder="Hey everyone! I just dropped a highly requested video in the channel..."
+                                style={{ border: '1px solid rgba(244,63,94,0.3)', background: 'rgba(244,63,94,0.02)' }}
+                            />
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
+                                <button 
+                                    className="btn-gold" 
+                                    onClick={handleBroadcast} 
+                                    disabled={broadcastLoading || !broadcastMsg.trim() || activeSubs.length === 0}
+                                    style={{ background: 'var(--rose)', color: '#fff', padding: '0.75rem 1.5rem', boxShadow: '0 0 15px rgba(244,63,94,0.3)' }}
+                                >
+                                    {broadcastLoading ? <><Spinner light /> Transmitting...</> : <><Send size={16} /> Broadcast to {activeSubs.length} Users</>}
+                                </button>
+                            </div>
+                        </SectionCard>
+                    </>
+                )}
 
                 {/* ── Profile & Setup ── */}
                 {activeTab === 'profile' && (

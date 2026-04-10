@@ -134,10 +134,21 @@ export default function Admin() {
         if (token) { fetchSettings(); fetchPreviews(); fetchSubscriptions(); }
     }, [token]);
 
+    const handleAuthError = (data) => {
+        if (data && data.error && (data.error === 'Invalid token' || data.error === 'Access denied')) {
+            setToken('');
+            localStorage.removeItem('prachi_admin_token');
+            showNotify('Session expired. Please login again.', 'error');
+            return true;
+        }
+        return false;
+    };
+
     const fetchSettings = () => {
         fetch(`${API_BASE}/api/admin/settings`, {
             headers: { 'Authorization': `Bearer ${token}` }
         }).then(r => r.json()).then(data => {
+            if (handleAuthError(data)) return;
             if (data && data.profile_name) setSettingsData(prev => ({ ...prev, ...data }));
         }).catch(console.error);
 
@@ -154,17 +165,26 @@ export default function Admin() {
     const fetchPreviews = () => {
         fetch(`${API_BASE}/api/admin/previews`, {
             headers: { 'Authorization': `Bearer ${token}` }
-        }).then(r => r.json()).then(setPreviews).catch(console.error);
+        }).then(r => r.json()).then(data => {
+            if (handleAuthError(data)) return;
+            setPreviews(Array.isArray(data) ? data : []);
+        }).catch(console.error);
     };
 
     const fetchSubscriptions = () => {
         fetch(`${API_BASE}/api/admin/subscriptions`, {
             headers: { 'Authorization': `Bearer ${token}` }
-        }).then(r => r.json()).then(setSubscriptions).catch(console.error);
+        }).then(r => r.json()).then(data => {
+            if (handleAuthError(data)) return;
+            setSubscriptions(Array.isArray(data) ? data : []);
+        }).catch(console.error);
 
         fetch(`${API_BASE}/api/admin/subscriptions/stats`, {
             headers: { 'Authorization': `Bearer ${token}` }
-        }).then(r => r.json()).then(setSubStats).catch(console.error);
+        }).then(r => r.json()).then(data => {
+            if (handleAuthError(data)) return;
+            setSubStats(data);
+        }).catch(console.error);
     };
 
     const handleCancelSub = async (id) => {
@@ -450,10 +470,11 @@ export default function Admin() {
         { id: 'subscriptions', label: 'Subscriptions', icon: <Users size={17} /> },
     ];
 
-    // Compute Metrics
-    const activeSubs = subscriptions.filter(s => s.status === 'active' && new Date(s.expires_at) > new Date());
+    // Compute Metrics safely
+    const safeSubscriptions = Array.isArray(subscriptions) ? subscriptions : [];
+    const activeSubs = safeSubscriptions.filter(s => s.status === 'active' && new Date(s.expires_at) > new Date());
     const mrr = activeSubs.reduce((sum, s) => sum + (Number(s.amount) || 0), 0);
-    const totalRevenue = subscriptions.reduce((sum, s) => sum + (Number(s.amount) || 0), 0);
+    const totalRevenue = safeSubscriptions.reduce((sum, s) => sum + (Number(s.amount) || 0), 0);
 
     /* ===== DASHBOARD ===== */
     return (

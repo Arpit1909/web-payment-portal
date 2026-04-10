@@ -131,7 +131,17 @@ export default function Admin() {
     };
 
     useEffect(() => {
-        if (token) { fetchSettings(); fetchPreviews(); fetchSubscriptions(); }
+        let interval;
+        if (token) { 
+            fetchSettings(); 
+            fetchPreviews(); 
+            fetchSubscriptions(); 
+            interval = setInterval(() => {
+                fetchPreviews();
+                fetchSubscriptions();
+            }, 5000);
+        }
+        return () => { if (interval) clearInterval(interval); };
     }, [token]);
 
     const handleAuthError = (data) => {

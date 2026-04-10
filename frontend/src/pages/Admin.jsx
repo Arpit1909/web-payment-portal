@@ -154,10 +154,26 @@ export default function Admin() {
 
         fetch(`${API_BASE}/api/public/data`)
             .then(r => r.json()).then(data => {
+                let timerDate = '';
+                if (data.offer && data.offer.timer_end_date) {
+                    try {
+                        const d = new Date(data.offer.timer_end_date);
+                        if (!isNaN(d)) {
+                            // Extract exact local YYYY-MM-DDThh:mm from Date object
+                            // e.g. "2026-04-10T12:48"
+                            const y = d.getFullYear();
+                            const m = String(d.getMonth() + 1).padStart(2, '0');
+                            const day = String(d.getDate()).padStart(2, '0');
+                            const h = String(d.getHours()).padStart(2, '0');
+                            const min = String(d.getMinutes()).padStart(2, '0');
+                            timerDate = `${y}-${m}-${day}T${h}:${min}`;
+                        }
+                    } catch(e) {}
+                }
                 if (data.offer) setOfferData({
                     original_price: data.offer.original_price || 899,
                     discounted_price: data.offer.discounted_price || 199,
-                    timer_end_date: data.offer.timer_end_date || ''
+                    timer_end_date: timerDate
                 });
             }).catch(console.error);
     };
@@ -268,10 +284,15 @@ export default function Admin() {
         if (e) e.preventDefault();
         setLoading(true);
         try {
+            let payload = { ...offerData };
+            if (payload.timer_end_date) {
+                const d = new Date(payload.timer_end_date);
+                if (!isNaN(d)) payload.timer_end_date = d.toISOString();
+            }
             const res = await fetch(`${API_BASE}/api/admin/offer`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                body: JSON.stringify(offerData)
+                body: JSON.stringify(payload)
             });
             const data = await res.json();
             data.success ? showNotify('Pricing updated successfully!') : showNotify('Failed to update pricing.', 'error');

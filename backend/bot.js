@@ -1,5 +1,5 @@
 const supabase = require('./database');
-const { callTelegramAPI, kickUser, sendMessage } = require('./telegram');
+const { callTelegramAPI, kickUser, sendMessage, deleteMessage } = require('./telegram');
 require('dotenv').config();
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -18,6 +18,10 @@ let lastUpdateId = 0;
 let polling = false;
 let cachedBotUsername = process.env.TELEGRAM_BOT_USERNAME || '';
 
+// Tracks welcome message IDs so they can be deleted when a user leaves
+// key: `${userId}_${chatId}`, value: messageId
+const welcomeMessageIds = new Map();
+
 function isAdmin(userId) {
     return ADMIN_IDS.includes(String(userId));
 }
@@ -30,7 +34,21 @@ async function handleNewChatMember(update) {
 
     if (update.chat_member) {
         const newMember = update.chat_member.new_chat_member;
-        if (!newMember || newMember.status === 'left' || newMember.status === 'kicked') return;
+        if (!newMember) return;
+
+        // User left or was kicked — delete their welcome message if we have it
+        if (newMember.status === 'left' || newMember.status === 'kicked') {
+            const leftUserId = newMember.user.id;
+            const leftChatId = update.chat_member.chat.id;
+            const key = `${leftUserId}_${leftChatId}`;
+            const msgId = welcomeMessageIds.get(key);
+            if (msgId) {
+                try { await deleteMessage(leftChatId, msgId); } catch (_) {}
+                welcomeMessageIds.delete(key);
+            }
+            return;
+        }
+
         userId = newMember.user.id;
         username = newMember.user.username || '';
         firstName = newMember.user.first_name || '';
@@ -57,7 +75,7 @@ async function handleNewChatMember(update) {
         console.log(`[BOT] User @${username || userId} joined public channel`);
         const botStartUrl = cachedBotUsername ? `https://t.me/${cachedBotUsername}?start=public` : frontendUrl;
         try {
-            await sendMessage(chatId,
+            const res = await sendMessage(chatId,
                 `Hi ${userMention}! Welcome to Prachi's Public Channel! 🎉❤️\n\n` +
                 `🔔 <b>Start the bot</b> to get notified when:\n` +
                 `• New exclusive content drops 🔥\n` +
@@ -71,6 +89,7 @@ async function handleNewChatMember(update) {
                     ]
                 }
             );
+            if (res.ok && res.result) welcomeMessageIds.set(`${userId}_${chatId}`, res.result.message_id);
         } catch (e) {
             console.error(`[BOT] Public welcome failed for ${userId}:`, e.message);
         }
@@ -127,7 +146,7 @@ async function handleNewChatMember(update) {
     // --- VIP WELCOME MESSAGE ---
     const botStartUrl = cachedBotUsername ? `https://t.me/${cachedBotUsername}?start=vip` : frontendUrl;
     try {
-        await sendMessage(chatId,
+        const res = await sendMessage(chatId,
             `Hi ${userMention}! Welcome to the exclusive channel baby 🔥😘💋\n\n` +
             `⚠️ <b>Important — Start the bot to activate your membership perks:</b>\n` +
             `• ⏰ Renewal reminders before your access expires\n` +
@@ -140,6 +159,7 @@ async function handleNewChatMember(update) {
                 ]
             }
         );
+        if (res.ok && res.result) welcomeMessageIds.set(`${userId}_${chatId}`, res.result.message_id);
     } catch (e) {
         console.error(`[BOT] VIP welcome failed for ${userId}:`, e.message);
     }

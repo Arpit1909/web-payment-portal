@@ -1,0 +1,938 @@
+const express = require('express');
+const cors = require('cors');
+const dotenv = require('dotenv');
+const supabase = require('./database');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const multer = require('multer');
+const fs = require('fs');
+const path = require('path');
+const cron = require('node-cron');
+const sharp = require('sharp');
+const telegram = require('./telegram');
+const instantpay = require('./instantpay');
+const { pollUpdates } = require('./bot');
+
+dotenv.config();
+
+const app = express();
+const PORT = process.env.PORT || 5000;
+const SECRET_KEY = process.env.JWT_SECRET || 'supersecretkey123';
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin@example.com';
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
+
+// Middleware
+app.use(cors({ origin: [FRONTEND_URL, `http://localhost:${PORT}`], credentials: true }));
+app.use(express.json());
+
+if (!fs.existsSync('uploads')) {
+    fs.mkdirSync('uploads');
+}
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => cb(null, 'uploads/'),
+    filename: (req, file, cb) => {
+        cb(null, Date.now() + '-' + Math.round(Math.random() * 1E9) + path.extname(file.originalname));
+    }
+});
+const upload = multer({ storage });
+// Serve static upload files
+app.use('/uploads', express.static('uploads'));
+
+// --- PUBLIC ROUTES (Frontend Portal) ---
+
+// 1. Get current public offer and settings API
+app.get('/api/public/data', async (req, res) => {
+    try {
+        const [
+            { data: offer },
+            { data: settings },
+            { data: previews },
+            { count: activeCount }
+        ] = await Promise.all([
+            supabase.from('prachi_offers').select('*').eq('is_active', 1).order('id', { ascending: false }).limit(1).maybeSingle(),
+            supabase.from('prachi_settings').select('*').order('id', { ascending: false }).limit(1).maybeSingle(),
+            supabase.from('prachi_previews').select('*').order('order_index', { ascending: true }),
+            supabase.from('prachi_subscriptions').select('*', { count: 'exact', head: true }).eq('status', 'active')
+        ]);
+        
+        res.json({
+            offer: offer || {},
+            settings: settings || {},
+            upi_id: settings ? settings.upi_id : '',
+            previews: previews || [],
+            active_members_count: activeCount || 0,
+            bot_username: process.env.TELEGRAM_BOT_USERNAME || ''
+        });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// 2. InstantPay — Create a payment request
+const BACKEND_URL = process.env.BACKEND_URL || `http://localhost:${PORT}`;
+
+app.post('/api/payment/create', async (req, res) => {
+    const { phone, telegramUsername, buyerName, email } = req.body;
+
+    if (!phone || phone.length < 10) {
+        return res.status(400).json({ error: 'Valid phone number is required' });
+    }
+
+    try {
+        const { data: offer, error: err } = await supabase.from('prachi_offers').select('*').eq('is_active', 1).order('id', { ascending: false }).limit(1).maybeSingle();
+        if (err) return res.status(500).json({ error: err.message });
+
+        const amount = offer ? offer.discounted_price : 199;
+
+        const paymentRequest = await instantpay.createPaymentRequest({
+            amount,
+            purpose: 'Monthly Exclusive Content Subscription',
+            buyerName: buyerName || '',
+            phone,
+            email: email || '',
+            redirectUrl: `${FRONTEND_URL}/payment/callback`,
+            webhookUrl: `${BACKEND_URL}/api/payment/webhook`
+        });
+
+        await supabase.from('prachi_subscriptions').insert({
+            telegram_username: telegramUsername || '',
+            phone,
+            transaction_id: paymentRequest.id,
+            amount,
+            plan: 'monthly',
+            status: 'pending'
+        });
+
+        res.json({
+            success: true,
+            payment_url: paymentRequest.longurl,
+            payment_request_id: paymentRequest.id
+        });
+    } catch (e) {
+        console.error('InstantPay create error:', e.message);
+        res.status(500).json({ error: 'Payment gateway error. Please try again.' });
+    }
+});
+
+// 2b. InstantPay — Webhook (server-to-server callback after payment)
+app.post('/api/payment/webhook', (req, res) => {
+    const { payment_request_id, payment_id, status } = req.body;
+
+    console.log(`[Webhook] payment_request_id=${payment_request_id} payment_id=${payment_id} status=${status}`);
+
+    if (status === 'Credit') {
+        const now = new Date().toISOString();
+        const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+
+        (async () => {
+            const { data: updatedSub, error: updateErr } = await supabase
+                .from('prachi_subscriptions')
+                .update({ status: 'active', expires_at: expiresAt, transaction_id: payment_id })
+                .eq('transaction_id', payment_request_id)
+                .eq('status', 'pending')
+                .select()
+                .maybeSingle();
+
+            if (updateErr) console.error('[Webhook] DB update error:', updateErr.message);
+            else if (updatedSub) {
+                console.log(`[Webhook] Subscription activated for request ${payment_request_id}`);
+                await supabase.from('prachi_payment_logs').insert({
+                    subscription_id: updatedSub.id,
+                    transaction_id: payment_id,
+                    amount: updatedSub.amount,
+                    status: 'success',
+                    paid_at: now
+                });
+                // Notify admins of new subscriber
+                if (process.env.TELEGRAM_BOT_TOKEN) {
+                    const adminIds = (process.env.TELEGRAM_ADMIN_ID || '').split(',').map(s => s.trim()).filter(Boolean);
+                    const expiryFormatted = new Date(expiresAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+                    for (const adminId of adminIds) {
+                        try {
+                            await telegram.sendMessage(adminId,
+                                `💰 <b>New Subscriber!</b>\n\n` +
+                                `📱 Phone: ${updatedSub.phone || 'N/A'}\n` +
+                                `👤 Telegram: ${updatedSub.telegram_username || 'N/A'}\n` +
+                                `💳 Amount: ₹${updatedSub.amount}\n` +
+                                `📅 Expires: ${expiryFormatted}`
+                            );
+                        } catch (_) {}
+                    }
+                }
+            }
+        })();
+    }
+
+    res.status(200).send('OK');
+});
+
+// 2c. InstantPay — Verify payment from frontend after redirect
+app.get('/api/payment/verify/:paymentRequestId/:paymentId', async (req, res) => {
+    const { paymentRequestId, paymentId } = req.params;
+
+    try {
+        const result = await instantpay.verifyPayment(paymentRequestId, paymentId);
+
+        if (!result.verified) {
+            return res.json({ success: false, reason: result.reason });
+        }
+
+        const now = new Date().toISOString();
+        const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+
+        let inviteUrl = 'https://t.me/placeholder';
+        const { data: settings } = await supabase.from('prachi_settings').select('telegram_channel_url').order('id', { ascending: false }).limit(1).maybeSingle();
+        if (settings) inviteUrl = settings.telegram_channel_url;
+        
+        const getInviteUrl = async () => {
+            let url = inviteUrl;
+            if (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHANNEL_ID) {
+                try {
+                    const linkRes = await telegram.createInviteLink(86400);
+                    if (linkRes.ok && linkRes.result) url = linkRes.result.invite_link;
+                } catch (_) {}
+            }
+            return url;
+        };
+
+        const { data: existingSub } = await supabase.from('prachi_subscriptions').select('*').eq('transaction_id', paymentId).maybeSingle();
+        
+        if (existingSub && existingSub.status === 'active') {
+            return res.json({ success: true, telegram_url: await getInviteUrl(), expires_at: existingSub.expires_at });
+        }
+
+        const { data: updatedSub, error: updateErr } = await supabase
+            .from('prachi_subscriptions')
+            .update({ status: 'active', expires_at: expiresAt, transaction_id: paymentId })
+            .eq('transaction_id', paymentRequestId)
+            .eq('status', 'pending')
+            .select()
+            .maybeSingle();
+
+        if (updateErr) return res.status(500).json({ error: updateErr.message });
+
+        let currentSubId;
+        let amountPaid = result.amount;
+
+        if (!updatedSub) {
+            const { data: newSub } = await supabase.from('prachi_subscriptions').insert({
+                phone: result.buyerPhone || '',
+                transaction_id: paymentId,
+                amount: result.amount,
+                plan: 'monthly',
+                status: 'active',
+                started_at: now,
+                expires_at: expiresAt
+            }).select().maybeSingle();
+            if (newSub) currentSubId = newSub.id;
+        } else {
+            currentSubId = updatedSub.id;
+            amountPaid = updatedSub.amount;
+        }
+
+        if (currentSubId) {
+            await supabase.from('prachi_payment_logs').insert({
+                subscription_id: currentSubId,
+                transaction_id: paymentId,
+                amount: amountPaid,
+                status: 'success',
+                paid_at: now
+            });
+            // Notify admins of new subscriber
+            if (process.env.TELEGRAM_BOT_TOKEN) {
+                const adminIds = (process.env.TELEGRAM_ADMIN_ID || '').split(',').map(s => s.trim()).filter(Boolean);
+                const expiryFormatted = new Date(expiresAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+                for (const adminId of adminIds) {
+                    try {
+                        await telegram.sendMessage(adminId,
+                            `💰 <b>New Subscriber!</b>\n\n` +
+                            `📱 Phone: ${result.buyerPhone || 'N/A'}\n` +
+                            `💳 Amount: ₹${amountPaid}\n` +
+                            `📅 Expires: ${expiryFormatted}`
+                        );
+                    } catch (_) {}
+                }
+            }
+        }
+
+        res.json({ success: true, telegram_url: await getInviteUrl(), expires_at: expiresAt });
+    } catch (e) {
+        console.error('Payment verify error:', e.message);
+        res.status(500).json({ success: false, error: 'Verification failed' });
+    }
+});
+
+// 3. Check subscription status (public)
+app.get('/api/public/subscription/:phone', async (req, res) => {
+    const { data: sub, error } = await supabase
+        .from('prachi_subscriptions')
+        .select('*')
+        .eq('phone', req.params.phone)
+        .order('id', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+    
+    if (error) return res.status(500).json({ error: error.message });
+    if (!sub) return res.json({ active: false });
+    const isActive = sub.status === 'active' && new Date(sub.expires_at) > new Date();
+    res.json({ active: isActive, expires_at: sub.expires_at, status: sub.status });
+});
+
+// --- ADMIN ROUTES (Secured) ---
+
+// Middleware: Authenticate Admin JWT
+const verifyToken = (req, res, next) => {
+    const token = req.headers['authorization'];
+    if (!token) return res.status(401).json({ error: 'Access denied' });
+    
+    try {
+        const verified = jwt.verify(token.split(' ')[1], SECRET_KEY);
+        req.user = verified;
+        next();
+    } catch (err) {
+        res.status(400).json({ error: 'Invalid token' });
+    }
+};
+
+// Admin Login
+app.post('/api/admin/login', async (req, res) => {
+    const { username, password } = req.body;
+    
+    const { data: user, error } = await supabase.from('prachi_users').select('*').eq('username', username).maybeSingle();
+    if (error) return res.status(500).json({ error: error.message });
+    
+    if (!user) {
+        if (username === ADMIN_USERNAME) {
+            const hash = await bcrypt.hash(password, 10);
+            await supabase.from('prachi_users').insert({ username: ADMIN_USERNAME, password_hash: hash });
+            const token = jwt.sign({ username: ADMIN_USERNAME }, SECRET_KEY, { expiresIn: '1d' });
+            return res.json({ token });
+        }
+        return res.status(400).json({ error: 'User not found' });
+    }
+    
+    const validPass = await bcrypt.compare(password, user.password_hash);
+    if (!validPass) return res.status(400).json({ error: 'Invalid password' });
+    
+    const token = jwt.sign({ id: user.id, username: user.username }, SECRET_KEY, { expiresIn: '1d' });
+    res.json({ token });
+});
+
+// Update Offer
+app.put('/api/admin/offer', verifyToken, async (req, res) => {
+    const { original_price, discounted_price, timer_end_date } = req.body;
+    
+    const { data: latest } = await supabase.from('prachi_offers').select('id').order('id', { ascending: false }).limit(1).maybeSingle();
+    if (latest) {
+        const { error } = await supabase.from('prachi_offers').update({ original_price, discounted_price, timer_end_date }).eq('id', latest.id);
+        if (error) return res.status(500).json({ error: error.message });
+    } else {
+        await supabase.from('prachi_offers').insert({ original_price, discounted_price, timer_end_date });
+    }
+    res.json({ success: true });
+});
+
+// Get Settings
+app.get('/api/admin/settings', verifyToken, async (req, res) => {
+    const { data: settings, error } = await supabase.from('prachi_settings').select('*').order('id', { ascending: false }).limit(1).maybeSingle();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(settings || {});
+});
+
+// Update Settings
+app.put('/api/admin/settings', verifyToken, async (req, res) => {
+    const updateData = req.body;
+    const { data: latest } = await supabase.from('prachi_settings').select('id').order('id', { ascending: false }).limit(1).maybeSingle();
+    
+    if (latest) {
+        const { error } = await supabase.from('prachi_settings').update(updateData).eq('id', latest.id);
+        if (error) return res.status(500).json({ error: error.message });
+    } else {
+        await supabase.from('prachi_settings').insert(updateData);
+    }
+    res.json({ success: true });
+});
+
+// Upload media
+app.post('/api/admin/upload', verifyToken, upload.single('media'), (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    res.json({ url: `/uploads/${req.file.filename}` });
+});
+
+// Previews CRUD
+app.get('/api/admin/previews', verifyToken, async (req, res) => {
+    const { data: previews, error } = await supabase.from('prachi_previews').select('*').order('order_index', { ascending: true });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(previews || []);
+});
+
+app.post('/api/admin/previews', verifyToken, async (req, res) => {
+    const { title, url, type, is_locked, order_index, postDestination } = req.body;
+    // postDestination: 'vip' | 'public' | 'none'
+
+    const { data, error } = await supabase.from('prachi_previews').insert({
+        title: title || '', url, type: type || 'image', is_locked: is_locked !== undefined ? is_locked : 1, order_index: order_index || 0
+    }).select().maybeSingle();
+
+    if (error) return res.status(500).json({ error: error.message });
+
+    const dest = postDestination || 'none';
+
+    if (dest !== 'none' && process.env.TELEGRAM_BOT_TOKEN) {
+        const frontendUrl = process.env.FRONTEND_URL || 'https://yourwebsite.com';
+        const backendUrl = process.env.BACKEND_URL || frontendUrl;
+        const isImage = (type || 'image') === 'image';
+        const contentType = isImage ? '📸 New Photo' : '🎬 New Video';
+
+        (async () => {
+            try {
+                if (dest === 'vip') {
+                    // --- Post actual content to VIP channel ---
+                    const vipCaption = `${contentType} just dropped! 🔥\n\n<i>Enjoy the exclusive content!</i>`;
+                    if (isImage && url) {
+                        const photoUrl = `${backendUrl}${url}`;
+                        try {
+                            await telegram.sendPhotoToVipChannel(photoUrl, vipCaption);
+                        } catch (e) {
+                            console.error('[POST-VIP] Photo failed, sending text:', e.message);
+                            await telegram.postToVipChannel(vipCaption).catch(() => {});
+                        }
+                    } else {
+                        await telegram.postToVipChannel(vipCaption).catch(() => {});
+                    }
+
+                    // --- DM all active subscribers: new content alert ---
+                    const { data: activeSubs } = await supabase.from('prachi_subscriptions')
+                        .select('telegram_user_id')
+                        .eq('status', 'active')
+                        .gt('expires_at', new Date().toISOString())
+                        .not('telegram_user_id', 'is', null);
+                    if (activeSubs && activeSubs.length > 0) {
+                        for (const s of activeSubs) {
+                            try { await telegram.sendMessage(s.telegram_user_id, `🔥 New content just dropped in the channel! Go check it out! 👇`); } catch (_) {}
+                            await new Promise(r => setTimeout(r, 50));
+                        }
+                    }
+
+                    // --- Also post blurred teaser to public channel ---
+                    if (process.env.TELEGRAM_PUBLIC_CHANNEL_ID) {
+                        const teaserCaption =
+                            `${contentType} just dropped in the VIP Channel!\n\n` +
+                            `🔒 <b>Exclusive to VIP members only.</b>\n\n` +
+                            `👇 Tap below to get access!`;
+                        const keyboard = { inline_keyboard: [[{ text: '🔓 Join VIP Now', url: frontendUrl }]] };
+
+                        if (isImage && url) {
+                            const filename = url.replace('/uploads/', '');
+                            const inputPath = path.join('uploads', filename);
+                            const blurredFilename = `tease-${Date.now()}-${filename}`;
+                            const blurredPath = path.join('uploads', blurredFilename);
+                            try {
+                                await sharp(inputPath).blur(60).jpeg({ quality: 75 }).toFile(blurredPath);
+                                const blurredUrl = `${backendUrl}/uploads/${blurredFilename}`;
+                                await telegram.sendTeaserPhoto(blurredUrl, teaserCaption, keyboard);
+                                fs.unlink(blurredPath, () => {});
+                            } catch (e) {
+                                console.error('[POST-VIP] Blur failed, sending text teaser:', e.message);
+                                telegram.postToPublicChannel(teaserCaption, keyboard).catch(() => {});
+                            }
+                        } else {
+                            telegram.postToPublicChannel(teaserCaption, keyboard).catch(() => {});
+                        }
+                    }
+
+                } else if (dest === 'public') {
+                    // --- Post actual content to public channel (no blur) ---
+                    const publicCaption = `${contentType} just posted! 🎉`;
+                    const keyboard = { inline_keyboard: [[{ text: '🔓 Join VIP Now', url: frontendUrl }]] };
+
+                    if (isImage && url) {
+                        const photoUrl = `${backendUrl}${url}`;
+                        try {
+                            await telegram.sendTeaserPhoto(photoUrl, publicCaption, keyboard);
+                        } catch (e) {
+                            console.error('[POST-PUBLIC] Photo failed, sending text:', e.message);
+                            telegram.postToPublicChannel(publicCaption, keyboard).catch(() => {});
+                        }
+                    } else {
+                        telegram.postToPublicChannel(publicCaption, keyboard).catch(() => {});
+                    }
+                }
+            } catch (e) {
+                console.error('[POST-CHANNEL] Unexpected error:', e.message);
+            }
+        })();
+    }
+
+    res.json({ success: true, id: data.id });
+});
+
+app.delete('/api/admin/previews/:id', verifyToken, async (req, res) => {
+    const { error } = await supabase.from('prachi_previews').delete().eq('id', req.params.id);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ success: true });
+});
+
+// Mass Broadcast
+app.post('/api/admin/broadcast', verifyToken, async (req, res) => {
+    const { messageText } = req.body;
+    if (!messageText) return res.status(400).json({ error: 'Message text is required' });
+
+    const { data: subs, error } = await supabase
+        .from('prachi_subscriptions')
+        .select('telegram_user_id')
+        .eq('status', 'active')
+        .not('telegram_user_id', 'is', null);
+
+    if (error) return res.status(500).json({ error: error.message });
+
+    let sentCount = 0;
+    for (const sub of subs) {
+        try {
+            await telegram.sendMessage(sub.telegram_user_id, messageText);
+            sentCount++;
+        } catch (err) {
+            console.error('[Broadcast] Failed for', sub.telegram_user_id, err.message);
+        }
+    }
+
+    res.json({ success: true, sentCount, totalActive: subs.length });
+});
+
+// --- SUBSCRIPTION MANAGEMENT (Admin) ---
+
+// List all subscriptions
+app.get('/api/admin/subscriptions', verifyToken, async (req, res) => {
+    const { data: subs, error } = await supabase.from('prachi_subscriptions').select('*').order('id', { ascending: false });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(subs || []);
+});
+
+// Manually cancel a subscription + kick from channel
+app.put('/api/admin/subscriptions/:id/cancel', verifyToken, async (req, res) => {
+    const { id } = req.params;
+    
+    const { data: sub, error } = await supabase.from('prachi_subscriptions').select('*').eq('id', id).maybeSingle();
+    if (error) return res.status(500).json({ error: error.message });
+    if (!sub) return res.status(404).json({ error: 'Subscription not found' });
+
+    if (sub.telegram_user_id && process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHANNEL_ID) {
+        try {
+            await telegram.kickUser(sub.telegram_user_id);
+            try {
+                await telegram.sendMessage(sub.telegram_user_id,
+                    '⚠️ Your subscription has expired. Please renew to continue accessing the private channel.'
+                );
+            } catch (_) {}
+        } catch (e) {
+            console.error('Kick error:', e.message);
+        }
+    }
+
+    const now = new Date().toISOString();
+    const { error: err2 } = await supabase.from('prachi_subscriptions').update({ status: 'cancelled', cancelled_at: now, kicked_at: now }).eq('id', id);
+    if (err2) return res.status(500).json({ error: err2.message });
+    res.json({ success: true });
+});
+
+// Manually reactivate a subscription
+app.put('/api/admin/subscriptions/:id/reactivate', verifyToken, async (req, res) => {
+    const { id } = req.params;
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+
+    const { data: sub, error } = await supabase.from('prachi_subscriptions').select('*').eq('id', id).maybeSingle();
+    if (error) return res.status(500).json({ error: error.message });
+    if (!sub) return res.status(404).json({ error: 'Subscription not found' });
+
+    if (sub.telegram_user_id && process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHANNEL_ID) {
+        try {
+            await telegram.unbanUser(sub.telegram_user_id);
+        } catch (e) {
+            console.error('Unban error:', e.message);
+        }
+    }
+
+    const { error: err2 } = await supabase.from('prachi_subscriptions').update({ status: 'active', expires_at: expiresAt, cancelled_at: null, kicked_at: null }).eq('id', id);
+    if (err2) return res.status(500).json({ error: err2.message });
+    res.json({ success: true, expires_at: expiresAt });
+});
+
+// Get subscription stats
+app.get('/api/admin/subscriptions/stats', verifyToken, async (req, res) => {
+    const { data: subs, error } = await supabase.from('prachi_subscriptions').select('*');
+    if (error) return res.status(500).json({ error: error.message });
+    
+    let stats = { total: 0, active: 0, cancelled: 0, expired: 0 };
+    if (subs) {
+        const now = new Date();
+        subs.forEach(s => {
+            stats.total++;
+            if (s.status === 'active' && new Date(s.expires_at) > now) stats.active++;
+            if (s.status === 'cancelled') stats.cancelled++;
+            if (s.status === 'expired') stats.expired++;
+        });
+    }
+    res.json(stats);
+});
+
+// Post promo message to public channel
+app.post('/api/admin/post-to-public', verifyToken, async (req, res) => {
+    const { message } = req.body;
+    if (!message || !message.trim()) return res.status(400).json({ error: 'Message is required' });
+
+    if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_PUBLIC_CHANNEL_ID) {
+        return res.status(400).json({ error: 'TELEGRAM_PUBLIC_CHANNEL_ID not configured on server' });
+    }
+
+    try {
+        const frontendUrl = process.env.FRONTEND_URL || 'https://yourwebsite.com';
+        await telegram.postToPublicChannel(message, {
+            inline_keyboard: [[{ text: '🔓 Join VIP Now', url: frontendUrl }]]
+        });
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// --- CRON: Check expired and expiring subscriptions every hour ---
+cron.schedule('0 * * * *', async () => {
+    console.log('[CRON] Checking expiring subscriptions...');
+    const now = new Date().toISOString();
+
+    // 1. Kick Expired Users
+    const { data: expiredSubs } = await supabase
+        .from('prachi_subscriptions')
+        .select('*')
+        .eq('status', 'active')
+        .lte('expires_at', now);
+
+    if (expiredSubs && expiredSubs.length > 0) {
+        for (const sub of expiredSubs) {
+            if (sub.telegram_user_id && process.env.TELEGRAM_BOT_TOKEN) {
+                try { await telegram.kickUser(sub.telegram_user_id); } catch (_) {}
+                try { await telegram.sendMessage(sub.telegram_user_id, '⚠️ Your monthly subscription has expired.\n\n🔒 Your access to the private channel has been removed.\n\n💳 Renew now to continue enjoying exclusive content!'); } catch (_) {}
+            }
+            await supabase.from('prachi_subscriptions').update({ status: 'expired', kicked_at: now }).eq('id', sub.id);
+        }
+    }
+
+    // Helper to find subs expiring in exactly X hours natively
+    const notifySubs = async (hoursAway, messageText, replyMarkup = null) => {
+        const startWindow = new Date(Date.now() + (hoursAway - 1) * 60 * 60 * 1000).toISOString();
+        const endWindow = new Date(Date.now() + hoursAway * 60 * 60 * 1000).toISOString();
+        
+        const { data: expiringSubs } = await supabase
+            .from('prachi_subscriptions')
+            .select('*')
+            .eq('status', 'active')
+            .gte('expires_at', startWindow)
+            .lte('expires_at', endWindow)
+            .not('telegram_user_id', 'is', null);
+
+        if (expiringSubs && expiringSubs.length > 0) {
+            for (const sub of expiringSubs) {
+                try {
+                    await telegram.sendMessage(sub.telegram_user_id, messageText, replyMarkup);
+                } catch (_) {}
+            }
+        }
+    };
+
+    const frontendUrl = process.env.FRONTEND_URL || 'https://yourwebsite.com';
+    const renewKeyboard = { inline_keyboard: [[{ text: '💳 Renew Subscription Now', url: frontendUrl }]] };
+
+    // 2. Send 3-Day Reminders (72 hours)
+    await notifySubs(72, "🔔 <b>Subscription Reminder</b>\n\nYour VIP access expires in exactly <b>3 Days</b>!\n\nPlease renew on the website soon to avoid losing access.", renewKeyboard);
+    
+    // 3. Send 1-Day Reminders (24 hours)  
+    await notifySubs(24, "🚨 <b>Final Reminder!</b>\n\nYour VIP access expires in <b>24 Hours</b>!\n\nRenew your subscription right now to ensure uninterrupted access to the channel!", renewKeyboard);
+
+    // 4. Testimonial Collection (7 days post signup)
+    // Find users whose started_at was exactly 7 days ago
+    const testStartWindow = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000 - 1 * 60 * 60 * 1000).toISOString();
+    const testEndWindow = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+    const { data: testimonialSubs } = await supabase
+        .from('prachi_subscriptions')
+        .select('*')
+        .eq('status', 'active')
+        .gte('started_at', testStartWindow)
+        .lte('started_at', testEndWindow)
+        .not('telegram_user_id', 'is', null);
+
+    if (testimonialSubs && testimonialSubs.length > 0) {
+        for (const sub of testimonialSubs) {
+            try {
+                await telegram.sendMessage(sub.telegram_user_id, 
+                    "👋 Hi! You've been in the VIP group for a week now.\n\nAre you enjoying the exclusive videos and photos?",
+                    {
+                        inline_keyboard: [
+                            [{ text: '⭐⭐⭐⭐⭐ (Love it!)', callback_data: 'rate_5' }],
+                            [{ text: 'It is okay', callback_data: 'rate_3' }]
+                        ]
+                    }
+                );
+            } catch (_) {}
+        }
+    }
+});
+
+// --- CRON: Win-back DM (3 days after expiry, daily at noon) ---
+cron.schedule('0 12 * * *', async () => {
+    if (!process.env.TELEGRAM_BOT_TOKEN) return;
+    const frontendUrl = process.env.FRONTEND_URL || 'https://yourwebsite.com';
+    const end = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+    const start = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000 - 60 * 60 * 1000).toISOString();
+    const { data: expired } = await supabase.from('prachi_subscriptions')
+        .select('*').in('status', ['expired', 'cancelled'])
+        .gte('expires_at', start).lte('expires_at', end)
+        .not('telegram_user_id', 'is', null);
+    if (expired) {
+        for (const sub of expired) {
+            try {
+                await telegram.sendMessage(sub.telegram_user_id,
+                    `💔 Hey! We miss you!\n\nYour VIP access expired 3 days ago. Come back and enjoy exclusive content again! 😘\n\n✨ Tap below to rejoin:`,
+                    { inline_keyboard: [[{ text: '💳 Come Back!', url: frontendUrl }]] }
+                );
+            } catch (_) {}
+        }
+    }
+    console.log('[CRON] Win-back messages sent');
+});
+
+// --- CRON: Loyalty messages (1 month & 3 month anniversaries, daily at 11am) ---
+cron.schedule('0 11 * * *', async () => {
+    if (!process.env.TELEGRAM_BOT_TOKEN) return;
+    const check = async (days, msg) => {
+        const end = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+        const start = new Date(Date.now() - days * 24 * 60 * 60 * 1000 - 60 * 60 * 1000).toISOString();
+        const { data: subs } = await supabase.from('prachi_subscriptions')
+            .select('*').eq('status', 'active')
+            .gte('started_at', start).lte('started_at', end)
+            .not('telegram_user_id', 'is', null);
+        if (subs) {
+            for (const sub of subs) {
+                try { await telegram.sendMessage(sub.telegram_user_id, msg); } catch (_) {}
+            }
+        }
+    };
+    await check(30, `🎉 Happy 1 Month Anniversary!\n\nYou've been part of our VIP family for a full month now! Thank you so much for your support — it means everything! 💖\n\nHope you're enjoying all the exclusive content! 😘`);
+    await check(90, `👑 3 Months Strong!\n\nYou've been a loyal VIP member for 3 whole months! You're an absolute legend and we love having you here! 💋🔥\n\nThank you from the bottom of my heart! 💖`);
+    console.log('[CRON] Loyalty messages sent');
+});
+
+// --- CRON: Daily morning report to admins (9am) ---
+cron.schedule('0 9 * * *', async () => {
+    if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_ADMIN_ID) return;
+    try {
+        const nowTime = new Date();
+        const nowIso = nowTime.toISOString();
+        const todayStart = new Date(nowTime.setHours(0, 0, 0, 0)).toISOString();
+        const { data: allSubs } = await supabase.from('prachi_subscriptions').select('*');
+        if (!allSubs) return;
+        let active = 0, expired = 0, cancelled = 0, revenue = 0, newToday = 0;
+        const expiringToday = [];
+        allSubs.forEach(s => {
+            if (s.status === 'active' && new Date(s.expires_at) > new Date()) {
+                active++; revenue += s.amount || 0;
+                if (new Date(s.expires_at) < new Date(Date.now() + 24 * 60 * 60 * 1000)) {
+                    expiringToday.push(s.telegram_username || s.phone || `#${s.id}`);
+                }
+            }
+            if (s.status === 'expired') expired++;
+            if (s.status === 'cancelled') cancelled++;
+            if (s.started_at && s.started_at >= todayStart) newToday++;
+        });
+        const msg =
+            `📊 <b>Daily Report — ${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</b>\n\n` +
+            `✅ Active: <b>${active}</b>\n` +
+            `🆕 New today: <b>${newToday}</b>\n` +
+            `🕐 Expired: ${expired} | ❌ Cancelled: ${cancelled}\n` +
+            `💰 Active revenue: ₹${revenue}\n` +
+            (expiringToday.length > 0 ? `\n⚠️ <b>Expiring in 24h:</b>\n${expiringToday.slice(0, 10).map(n => `• ${n}`).join('\n')}` : `\n✅ No expiries in next 24h`);
+        const adminIds = (process.env.TELEGRAM_ADMIN_ID || '').split(',').map(s => s.trim()).filter(Boolean);
+        for (const adminId of adminIds) {
+            try { await telegram.sendMessage(adminId, msg); } catch (_) {}
+        }
+        console.log('[CRON] Daily report sent');
+    } catch (e) {
+        console.error('[CRON] Daily report failed:', e.message);
+    }
+});
+
+// --- CRON: Weekly subscriber count post to public channel (every Monday 10am) ---
+cron.schedule('0 10 * * 1', async () => {
+    if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_PUBLIC_CHANNEL_ID) return;
+
+    try {
+        const now = new Date();
+        const weekAgo = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+        const [{ count: totalActive }, { count: newThisWeek }] = await Promise.all([
+            supabase.from('prachi_subscriptions').select('*', { count: 'exact', head: true }).eq('status', 'active').gt('expires_at', now.toISOString()),
+            supabase.from('prachi_subscriptions').select('*', { count: 'exact', head: true }).gte('started_at', weekAgo)
+        ]);
+
+        const frontendUrl = process.env.FRONTEND_URL || 'https://yourwebsite.com';
+        const msg =
+            `🔥 <b>VIP Community Update</b>\n\n` +
+            `<b>${newThisWeek || 0} new members</b> joined the exclusive VIP channel this week!\n\n` +
+            `👥 Total active VIP members: <b>${totalActive || 0}</b>\n\n` +
+            `Don't miss out — join the fastest growing exclusive community! 👇`;
+
+        await telegram.postToPublicChannel(msg, {
+            inline_keyboard: [[{ text: '🔓 Join VIP Now', url: frontendUrl }]]
+        });
+        console.log('[CRON] Weekly subscriber count posted to public channel');
+    } catch (e) {
+        console.error('[CRON] Weekly post failed:', e.message);
+    }
+});
+
+// --- TELEGRAM TOOLS ---
+
+// Post a poll to VIP or public channel
+app.post('/api/admin/post-poll', verifyToken, async (req, res) => {
+    const { question, options, channel } = req.body;
+    if (!question || !options || options.length < 2) return res.status(400).json({ error: 'Question and at least 2 options required' });
+    const channelId = channel === 'vip' ? process.env.TELEGRAM_CHANNEL_ID : process.env.TELEGRAM_PUBLIC_CHANNEL_ID;
+    if (!channelId) return res.status(400).json({ error: 'Channel ID not configured' });
+    try {
+        await telegram.createPoll(channelId, question, options);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Post a countdown teaser to public channel (with optional pin)
+app.post('/api/admin/post-countdown', verifyToken, async (req, res) => {
+    const { hours, message } = req.body;
+    if (!hours) return res.status(400).json({ error: 'Hours required' });
+    const frontendUrl = process.env.FRONTEND_URL || 'https://yourwebsite.com';
+    const msg =
+        `⏰ <b>Something drops in ${hours} hour${hours > 1 ? 's' : ''}!</b>\n\n` +
+        `${message || '👀 Stay tuned for something exclusive...'}\n\n` +
+        `<i>VIP members only! 🔒</i>`;
+    const keyboard = { inline_keyboard: [[{ text: '🔓 Join VIP Now', url: frontendUrl }]] };
+    try {
+        const result = await telegram.postToPublicChannel(msg, keyboard);
+        if (result.ok && result.result && process.env.TELEGRAM_PUBLIC_CHANNEL_ID) {
+            try { await telegram.pinMessage(process.env.TELEGRAM_PUBLIC_CHANNEL_ID, result.result.message_id); } catch (_) {}
+        }
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// --- POST SCHEDULER ---
+const scheduledPosts = [];
+
+app.post('/api/admin/schedule-post', verifyToken, (req, res) => {
+    const { message, channel, scheduledAt, countdownHours, countdownMessage } = req.body;
+    if (!message || !scheduledAt) return res.status(400).json({ error: 'Message and scheduledAt required' });
+    const id = Date.now();
+    scheduledPosts.push({ id, message, channel: channel || 'vip', scheduledAt, countdownHours: countdownHours || null, countdownMessage: countdownMessage || '', sent: false, countdownSent: false, pinnedMessageId: null });
+    console.log(`[SCHEDULER] Post scheduled for ${scheduledAt} → ${channel}`);
+    res.json({ success: true, id });
+});
+
+app.get('/api/admin/scheduled-posts', verifyToken, (req, res) => {
+    res.json(scheduledPosts.filter(p => !p.sent));
+});
+
+app.delete('/api/admin/scheduled-posts/:id', verifyToken, (req, res) => {
+    const idx = scheduledPosts.findIndex(p => p.id === parseInt(req.params.id));
+    if (idx !== -1) scheduledPosts.splice(idx, 1);
+    res.json({ success: true });
+});
+
+// --- CRON: Scheduler check (every minute) ---
+cron.schedule('* * * * *', async () => {
+    const now = new Date();
+    const frontendUrl = process.env.FRONTEND_URL || 'https://yourwebsite.com';
+
+    for (const post of scheduledPosts) {
+        if (post.sent) continue;
+        const scheduledTime = new Date(post.scheduledAt);
+
+        // Send countdown if not yet sent
+        if (post.countdownHours && !post.countdownSent) {
+            const countdownTime = new Date(scheduledTime.getTime() - post.countdownHours * 60 * 60 * 1000);
+            if (now >= countdownTime) {
+                const cdMsg =
+                    `⏰ <b>Something drops in ${post.countdownHours} hour${post.countdownHours > 1 ? 's' : ''}!</b>\n\n` +
+                    `${post.countdownMessage || '👀 Stay tuned for something exclusive...'}\n\n` +
+                    `<i>VIP members only! 🔒</i>`;
+                const keyboard = { inline_keyboard: [[{ text: '🔓 Join VIP Now', url: frontendUrl }]] };
+                try {
+                    const result = await telegram.postToPublicChannel(cdMsg, keyboard);
+                    if (result.ok && result.result && process.env.TELEGRAM_PUBLIC_CHANNEL_ID) {
+                        try { await telegram.pinMessage(process.env.TELEGRAM_PUBLIC_CHANNEL_ID, result.result.message_id); post.pinnedMessageId = result.result.message_id; } catch (_) {}
+                    }
+                    post.countdownSent = true;
+                    console.log(`[SCHEDULER] Countdown posted for scheduled post #${post.id}`);
+                } catch (e) {
+                    console.error('[SCHEDULER] Countdown failed:', e.message);
+                }
+            }
+        }
+
+        // Send main post when due
+        if (now >= scheduledTime) {
+            try {
+                if (post.channel === 'vip') {
+                    await telegram.postToVipChannel(post.message);
+                    // DM all active subscribers
+                    const { data: subs } = await supabase.from('prachi_subscriptions')
+                        .select('telegram_user_id').eq('status', 'active')
+                        .gt('expires_at', now.toISOString()).not('telegram_user_id', 'is', null);
+                    if (subs) {
+                        for (const s of subs) {
+                            try { await telegram.sendMessage(s.telegram_user_id, `🔥 New content just dropped in the channel! Go check it out! 👇`); } catch (_) {}
+                            await new Promise(r => setTimeout(r, 50));
+                        }
+                    }
+                } else {
+                    await telegram.postToPublicChannel(post.message, { inline_keyboard: [[{ text: '🔓 Join VIP Now', url: frontendUrl }]] });
+                }
+                // Unpin countdown if it was pinned
+                if (post.pinnedMessageId && process.env.TELEGRAM_PUBLIC_CHANNEL_ID) {
+                    try { await telegram.unpinMessage(process.env.TELEGRAM_PUBLIC_CHANNEL_ID, post.pinnedMessageId); } catch (_) {}
+                }
+                post.sent = true;
+                console.log(`[SCHEDULER] Post #${post.id} sent to ${post.channel}`);
+            } catch (e) {
+                console.error('[SCHEDULER] Post failed:', e.message);
+            }
+        }
+    }
+
+    // Clean up sent posts older than 1 hour
+    const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+    for (let i = scheduledPosts.length - 1; i >= 0; i--) {
+        if (scheduledPosts[i].sent && new Date(scheduledPosts[i].scheduledAt) < oneHourAgo) {
+            scheduledPosts.splice(i, 1);
+        }
+    }
+});
+
+// --- SERVE FRONTEND (Production) ---
+// Serve the built React frontend from ../frontend/dist
+const frontendPath = path.join(__dirname, '..', 'frontend', 'dist');
+app.use(express.static(frontendPath));
+
+// SPA fallback — any route not matching an API or static file serves index.html
+app.get('{*path}', (req, res) => {
+    res.sendFile(path.join(frontendPath, 'index.html'));
+});
+
+// Start Server
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+    console.log(`Frontend served from ${frontendPath}`);
+    console.log(`Subscription expiry check runs every hour`);
+    pollUpdates();
+});

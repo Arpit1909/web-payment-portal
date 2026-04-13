@@ -16,6 +16,7 @@ function matchesChannel(chatId, channelId) {
 
 let lastUpdateId = 0;
 let polling = false;
+let cachedBotUsername = process.env.TELEGRAM_BOT_USERNAME || '';
 
 function isAdmin(userId) {
     return ADMIN_IDS.includes(String(userId));
@@ -54,8 +55,7 @@ async function handleNewChatMember(update) {
     // --- PUBLIC CHANNEL: send welcome with website link ---
     if (matchesChannel(chatId, PUBLIC_CHANNEL_ID) || matchesChannel(chatUsername, PUBLIC_CHANNEL_ID)) {
         console.log(`[BOT] User @${username || userId} joined public channel`);
-        const botUsername = process.env.TELEGRAM_BOT_USERNAME || '';
-        const botStartUrl = botUsername ? `https://t.me/${botUsername}?start=public` : frontendUrl;
+        const botStartUrl = cachedBotUsername ? `https://t.me/${cachedBotUsername}?start=public` : frontendUrl;
         try {
             await sendMessage(chatId,
                 `Hi ${userMention}! Welcome to Prachi's Public Channel! 🎉❤️\n\n` +
@@ -125,8 +125,7 @@ async function handleNewChatMember(update) {
     }
 
     // --- VIP WELCOME MESSAGE ---
-    const botUsername = process.env.TELEGRAM_BOT_USERNAME || '';
-    const botStartUrl = botUsername ? `https://t.me/${botUsername}?start=vip` : frontendUrl;
+    const botStartUrl = cachedBotUsername ? `https://t.me/${cachedBotUsername}?start=vip` : frontendUrl;
     try {
         await sendMessage(chatId,
             `Hi ${userMention}! Welcome to the exclusive channel baby 🔥😘💋\n\n` +
@@ -576,8 +575,13 @@ async function pollUpdates() {
     console.log('[BOT] Telegram bot started polling...');
 
     try {
-        await callTelegramAPI('getMe');
-        console.log('[BOT] Bot connected successfully');
+        const me = await callTelegramAPI('getMe');
+        if (me.ok && me.result && me.result.username) {
+            cachedBotUsername = me.result.username;
+            console.log(`[BOT] Bot connected: @${cachedBotUsername}`);
+        } else {
+            console.log('[BOT] Bot connected successfully');
+        }
     } catch (e) {
         console.error('[BOT] Failed to connect:', e.message);
         return;

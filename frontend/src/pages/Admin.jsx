@@ -153,6 +153,7 @@ export default function Admin() {
     const schedulePhotoRef = useRef(null);
     const [subscriptions, setSubscriptions] = useState([]);
     const [subStats, setSubStats] = useState({ total: 0, active: 0, cancelled: 0, expired: 0 });
+    const [channelStats, setChannelStats] = useState({ vip: null, public: null });
     const fileInputRef = useRef(null);
     const avatarInputRef = useRef(null);
     const coverInputRef = useRef(null);
@@ -175,13 +176,15 @@ export default function Admin() {
             fetchScheduledPosts();
             fetchPostedPolls();
             fetchPostedMessages();
+            fetchChannelStats();
             interval = setInterval(() => {
                 fetchPreviews();
                 fetchSubscriptions();
                 fetchScheduledPosts();
                 fetchPostedPolls();
                 fetchPostedMessages();
-            }, 5000);
+                fetchChannelStats();
+            }, 30000); // channel stats refresh every 30s (Telegram rate limits)
         }
         return () => { if (interval) clearInterval(interval); };
     }, [token]);
@@ -194,6 +197,14 @@ export default function Admin() {
             return true;
         }
         return false;
+    };
+
+    const fetchChannelStats = () => {
+        fetch(`${API_BASE}/api/admin/channel-stats`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        }).then(r => r.json()).then(data => {
+            if (data && !data.error) setChannelStats(data);
+        }).catch(console.error);
     };
 
     const fetchSettings = () => {
@@ -954,6 +965,26 @@ export default function Admin() {
                                 <h2 style={{ fontSize: '2.5rem', fontWeight: 900, color: '#fff', margin: 0 }}>{subStats.total > 0 ? Math.round((activeSubs.length / subStats.total) * 100) : 0}%</h2>
                                 <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: '0.5rem' }}>{subStats.cancelled} cancelled historically</p>
                             </div>
+
+                            {channelStats.vip !== null && (
+                                <div style={{ background: 'linear-gradient(145deg, rgba(229,165,75,0.1) 0%, rgba(229,165,75,0.02) 100%)', border: '1px solid rgba(229,165,75,0.2)', padding: '1.5rem', borderRadius: '16px' }}>
+                                    <div style={{ color: '#E5A54B', display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', fontSize: '0.9rem', fontWeight: 600 }}>
+                                        <Users size={18} /> VIP Members
+                                    </div>
+                                    <h2 style={{ fontSize: '2.5rem', fontWeight: 900, color: '#fff', margin: 0 }}>{channelStats.vip.toLocaleString()}</h2>
+                                    <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: '0.5rem' }}>Total in VIP channel (incl. non-paying)</p>
+                                </div>
+                            )}
+
+                            {channelStats.public !== null && (
+                                <div style={{ background: 'linear-gradient(145deg, rgba(56,189,248,0.1) 0%, rgba(56,189,248,0.02) 100%)', border: '1px solid rgba(56,189,248,0.2)', padding: '1.5rem', borderRadius: '16px' }}>
+                                    <div style={{ color: '#38BDF8', display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', fontSize: '0.9rem', fontWeight: 600 }}>
+                                        <Users size={18} /> Public Channel
+                                    </div>
+                                    <h2 style={{ fontSize: '2.5rem', fontWeight: 900, color: '#fff', margin: 0 }}>{channelStats.public.toLocaleString()}</h2>
+                                    <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: '0.5rem' }}>Total followers (free audience)</p>
+                                </div>
+                            )}
                         </div>
 
                         {/* God-Mode Broadcast Tool */}

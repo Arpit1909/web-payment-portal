@@ -857,6 +857,25 @@ app.post('/api/admin/post-countdown', verifyToken, async (req, res) => {
 
 app.get('/api/admin/posted-messages', verifyToken, (req, res) => res.json(postedMessages));
 
+// Channel member counts
+app.get('/api/admin/channel-stats', verifyToken, async (req, res) => {
+    const { callTelegramAPI } = require('./telegram');
+    const stats = { vip: null, public: null };
+    try {
+        if (process.env.TELEGRAM_CHANNEL_ID) {
+            const r = await callTelegramAPI('getChatMemberCount', { chat_id: process.env.TELEGRAM_CHANNEL_ID });
+            if (r.ok) stats.vip = r.result;
+        }
+    } catch (_) {}
+    try {
+        if (process.env.TELEGRAM_PUBLIC_CHANNEL_ID) {
+            const r = await callTelegramAPI('getChatMemberCount', { chat_id: process.env.TELEGRAM_PUBLIC_CHANNEL_ID });
+            if (r.ok) stats.public = r.result;
+        }
+    } catch (_) {}
+    res.json(stats);
+});
+
 // Add user to VIP channel by generating a one-time invite link and sending it to them
 app.post('/api/admin/invite-user', verifyToken, async (req, res) => {
     const { telegramUserId } = req.body;

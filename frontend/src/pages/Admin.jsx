@@ -106,6 +106,8 @@ export default function Admin() {
         profile_handle: '',
         profile_avatar: '',
         maintenance_mode: 0,
+        maintenance_title: '',
+        maintenance_end_time: '',
         fans_count: '',
         videos_count: '',
         bio_text: '',
@@ -295,16 +297,30 @@ export default function Admin() {
 
     const handleToggleMaintenance = async () => {
         const newVal = settingsData.maintenance_mode == 1 ? 0 : 1;
+        // Auto-set end_time to 24h from now if enabling and no future time set
+        let updatedSettings = { ...settingsData, maintenance_mode: newVal };
+        if (newVal == 1) {
+            const existingEnd = settingsData.maintenance_end_time ? new Date(settingsData.maintenance_end_time) : null;
+            if (!existingEnd || existingEnd <= new Date()) {
+                const defaultEnd = new Date(Date.now() + 24 * 60 * 60 * 1000);
+                const iso = defaultEnd.toISOString().slice(0, 16);
+                updatedSettings.maintenance_end_time = iso;
+                setSettingsData(prev => ({ ...prev, maintenance_mode: newVal, maintenance_end_time: iso }));
+            } else {
+                setSettingsData(prev => ({ ...prev, maintenance_mode: newVal }));
+            }
+        } else {
+            setSettingsData(prev => ({ ...prev, maintenance_mode: newVal }));
+        }
         setMaintenanceLoading(true);
         try {
             const res = await fetch(`${API_BASE}/api/admin/settings`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                body: JSON.stringify({ ...settingsData, maintenance_mode: newVal })
+                body: JSON.stringify(updatedSettings)
             });
             const data = await res.json();
             if (data.success) {
-                setSettingsData(prev => ({ ...prev, maintenance_mode: newVal }));
                 showNotify(newVal == 1 ? 'Maintenance mode ENABLED — site is now offline for visitors.' : 'Maintenance mode DISABLED — site is live again!');
             } else {
                 showNotify('Failed to update maintenance mode.', 'error');
@@ -846,6 +862,72 @@ export default function Admin() {
                                 {maintenanceLoading ? <><Spinner light /> Updating...</> : settingsData.maintenance_mode == 1 ? 'Disable — Go Live' : 'Enable Maintenance'}
                             </button>
                         </div>
+
+                        {/* Maintenance Countdown Settings — visible only when enabled */}
+                        {settingsData.maintenance_mode == 1 && (
+                            <div style={{
+                                background: 'rgba(245,158,11,0.06)',
+                                border: '1px solid rgba(245,158,11,0.2)',
+                                borderRadius: '16px', padding: '1.25rem 1.5rem',
+                                marginBottom: '2rem', display: 'flex', flexDirection: 'column', gap: '1rem',
+                            }}>
+                                <div style={{ fontWeight: 700, fontSize: '0.9rem', color: '#F59E0B', marginBottom: '0.25rem' }}>
+                                    ✨ Countdown Page Settings
+                                </div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                                    <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 600 }}>Page Headline</label>
+                                    <input
+                                        type="text"
+                                        placeholder="✨ Something special is coming for you!"
+                                        value={settingsData.maintenance_title}
+                                        onChange={e => setSettingsData(prev => ({ ...prev, maintenance_title: e.target.value }))}
+                                        style={{
+                                            background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)',
+                                            borderRadius: '10px', padding: '0.65rem 1rem', color: '#fff', fontSize: '0.9rem', outline: 'none',
+                                        }}
+                                    />
+                                </div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                                    <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 600 }}>Countdown End Date &amp; Time</label>
+                                    <input
+                                        type="datetime-local"
+                                        value={settingsData.maintenance_end_time}
+                                        onChange={e => setSettingsData(prev => ({ ...prev, maintenance_end_time: e.target.value }))}
+                                        style={{
+                                            background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)',
+                                            borderRadius: '10px', padding: '0.65rem 1rem', color: '#fff', fontSize: '0.9rem', outline: 'none',
+                                            colorScheme: 'dark',
+                                        }}
+                                    />
+                                </div>
+                                <button
+                                    onClick={async () => {
+                                        setMaintenanceLoading(true);
+                                        try {
+                                            const res = await fetch(`${API_BASE}/api/admin/settings`, {
+                                                method: 'PUT',
+                                                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                                body: JSON.stringify(settingsData)
+                                            });
+                                            const data = await res.json();
+                                            if (data.success) showNotify('Countdown settings saved!');
+                                            else showNotify('Failed to save settings.', 'error');
+                                        } catch { showNotify('Network error.', 'error'); }
+                                        setMaintenanceLoading(false);
+                                    }}
+                                    disabled={maintenanceLoading}
+                                    style={{
+                                        alignSelf: 'flex-start', padding: '0.6rem 1.4rem', borderRadius: '9999px',
+                                        background: 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)',
+                                        border: 'none', color: '#fff', fontWeight: 700, fontSize: '0.85rem',
+                                        cursor: maintenanceLoading ? 'not-allowed' : 'pointer',
+                                        opacity: maintenanceLoading ? 0.6 : 1,
+                                    }}
+                                >
+                                    {maintenanceLoading ? 'Saving...' : 'Save Countdown Settings'}
+                                </button>
+                            </div>
+                        )}
 
                         {/* Revenue Metrics */}
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '2rem' }}>

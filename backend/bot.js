@@ -25,13 +25,14 @@ async function handleNewChatMember(update) {
     const msg = update.chat_member || update.message;
     if (!msg) return;
 
-    let userId, username, chatId, chatUsername;
+    let userId, username, firstName, chatId, chatUsername;
 
     if (update.chat_member) {
         const newMember = update.chat_member.new_chat_member;
         if (!newMember || newMember.status === 'left' || newMember.status === 'kicked') return;
         userId = newMember.user.id;
         username = newMember.user.username || '';
+        firstName = newMember.user.first_name || '';
         chatId = update.chat_member.chat.id;
         chatUsername = update.chat_member.chat.username || '';
     } else if (msg.new_chat_members) {
@@ -39,6 +40,7 @@ async function handleNewChatMember(update) {
             if (member.is_bot) continue;
             userId = member.id;
             username = member.username || '';
+            firstName = member.first_name || '';
             chatId = msg.chat.id;
             chatUsername = msg.chat.username || '';
         }
@@ -47,21 +49,27 @@ async function handleNewChatMember(update) {
     if (!userId) return;
 
     const frontendUrl = process.env.FRONTEND_URL || 'https://yourwebsite.com';
+    const userMention = username ? `@${username}` : `<a href="tg://user?id=${userId}">${firstName || 'New member'}</a>`;
 
     // --- PUBLIC CHANNEL: send welcome with website link ---
     if (matchesChannel(chatId, PUBLIC_CHANNEL_ID) || matchesChannel(chatUsername, PUBLIC_CHANNEL_ID)) {
         console.log(`[BOT] User @${username || userId} joined public channel`);
+        const botUsername = process.env.TELEGRAM_BOT_USERNAME || '';
+        const botStartUrl = botUsername ? `https://t.me/${botUsername}?start=public` : frontendUrl;
         try {
-            await sendMessage(userId,
-                `👋 <b>Hey! Welcome to our community!</b>\n\n` +
-                `Thanks for joining our public channel. 🎉\n\n` +
-                `We post exclusive teasers, updates, and announcements here — but the <b>real content</b> is inside our private VIP channel.\n\n` +
-                `💎 Join VIP to unlock:\n` +
-                `• Full exclusive photos & videos\n` +
-                `• Direct access to private content\n` +
-                `• Early drops & special offers\n\n` +
-                `<i>Tap below to get access now! 👇</i>`,
-                { inline_keyboard: [[{ text: '🔓 Get VIP Access', url: frontendUrl }]] }
+            await sendMessage(chatId,
+                `Hi ${userMention}! Welcome to Prachi's Public Channel! 🎉❤️\n\n` +
+                `🔔 <b>Start the bot</b> to get notified when:\n` +
+                `• New exclusive content drops 🔥\n` +
+                `• Special offers & early access go live 💎\n` +
+                `• VIP deals are available just for you\n\n` +
+                `<i>Tap the button below so you never miss anything! 👇</i>`,
+                {
+                    inline_keyboard: [
+                        [{ text: '🔔 Start Bot — Get Notified', url: botStartUrl }],
+                        [{ text: '🔓 Get VIP Access', url: frontendUrl }]
+                    ]
+                }
             );
         } catch (e) {
             console.error(`[BOT] Public welcome failed for ${userId}:`, e.message);
@@ -117,16 +125,21 @@ async function handleNewChatMember(update) {
     }
 
     // --- VIP WELCOME MESSAGE ---
+    const botUsername = process.env.TELEGRAM_BOT_USERNAME || '';
+    const botStartUrl = botUsername ? `https://t.me/${botUsername}?start=vip` : frontendUrl;
     try {
-        await sendMessage(userId,
-            `🎉 <b>Hi! Welcome to the VIP Channel!</b>\n\n` +
-            `Thanks for subscribing — you now have full access to all exclusive content! 💖\n\n` +
-            `📌 <b>Quick Reminders:</b>\n` +
-            `• No screenshots or screen recording\n` +
-            `• Keep all content private\n` +
-            `• Enjoy and have fun! 🔥\n\n` +
-            `<i>Need help or want to renew? Just message me anytime!</i>`,
-            { inline_keyboard: [[{ text: '🌐 Visit Website', url: frontendUrl }]] }
+        await sendMessage(chatId,
+            `Hi ${userMention}! Welcome to the exclusive channel baby 🔥😘💋\n\n` +
+            `⚠️ <b>Important — Start the bot to activate your membership perks:</b>\n` +
+            `• ⏰ Renewal reminders before your access expires\n` +
+            `• 🔥 Instant alerts when new content drops\n` +
+            `• 💌 Personal updates & special surprises\n\n` +
+            `<i>Without starting the bot you won't receive any of these. Tap below! 👇</i>`,
+            {
+                inline_keyboard: [
+                    [{ text: '🔔 Start Bot — Activate Perks', url: botStartUrl }]
+                ]
+            }
         );
     } catch (e) {
         console.error(`[BOT] VIP welcome failed for ${userId}:`, e.message);
@@ -191,10 +204,36 @@ async function handleCommand(message) {
                     inline_keyboard: [
                         [{ text: '✅ Check My Subscription', callback_data: 'check_status' }],
                         [{ text: '💳 Renew / Get Access', url: frontendUrl }],
+                        [{ text: '🔄 Renew Status & Link', callback_data: 'renew_status' }],
                         [{ text: '🙋 Contact Support', callback_data: 'contact_support' }]
                     ]
                 }
             );
+        } else if (text === '/renew') {
+            const frontendUrl = process.env.FRONTEND_URL || 'https://yourwebsite.com';
+            const { data: sub } = await supabase.from('prachi_subscriptions')
+                .select('*')
+                .eq('telegram_user_id', String(userId))
+                .eq('status', 'active')
+                .order('id', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+            if (sub) {
+                const expires = new Date(sub.expires_at);
+                const daysLeft = Math.max(0, Math.ceil((expires - Date.now()) / (1000 * 60 * 60 * 24)));
+                await sendMessage(chatId,
+                    `⏳ <b>Your Subscription</b>\n\n` +
+                    `📅 Expires: ${expires.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}\n` +
+                    `⏳ Days left: <b>${daysLeft}</b>\n\n` +
+                    `Tap below to renew before it expires! 💳`,
+                    { inline_keyboard: [[{ text: '💳 Renew Now', url: frontendUrl }]] }
+                );
+            } else {
+                await sendMessage(chatId,
+                    '❌ No active subscription found.\n\nGet access from the website below!',
+                    { inline_keyboard: [[{ text: '💳 Get Access', url: frontendUrl }]] }
+                );
+            }
         } else if (text === '/status') {
             const { data: sub } = await supabase.from('prachi_subscriptions')
                 .select('*')
@@ -228,12 +267,13 @@ async function handleCommand(message) {
     if (text === '/start' || text.startsWith('/start ')) {
         await sendMessage(chatId,
             `👑 <b>Admin Panel — Bot Commands</b>\n\n` +
-            `Here's everything you can do:\n\n` +
             `📋 /subscribers — List all active VIP members\n` +
             `🕐 /expired — List expired &amp; cancelled subs\n` +
             `📊 /stats — Revenue &amp; subscriber statistics\n` +
             `📢 /broadcast &lt;msg&gt; — DM all active subscribers\n` +
             `👢 /kick &lt;username/phone&gt; — Kick &amp; cancel a user\n` +
+            `➕ /extend &lt;username&gt; &lt;days&gt; — Add days to a sub\n` +
+            `🔍 /search &lt;username/phone&gt; — Look up a user\n` +
             `❓ /help — Show this message again`
         );
         return;
@@ -378,14 +418,76 @@ async function handleCommand(message) {
         await sendMessage(chatId, `✅ <b>Broadcast Complete!</b>\nSuccess: ${success}\nFailed: ${fail}`);
     }
 
+    else if (text.startsWith('/extend ')) {
+        const parts = text.split(' ');
+        if (parts.length < 3) {
+            await sendMessage(chatId, '❌ Usage: /extend @username 7');
+            return;
+        }
+        const target = parts[1].replace('@', '');
+        const days = parseInt(parts[2]);
+        if (isNaN(days) || days <= 0) {
+            await sendMessage(chatId, '❌ Invalid number of days. Usage: /extend @username 7');
+            return;
+        }
+        const { data: sub } = await supabase.from('prachi_subscriptions')
+            .select('*')
+            .or(`telegram_username.eq.@${target},telegram_username.eq.${target},phone.eq.${target},telegram_user_id.eq.${target}`)
+            .order('id', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+        if (!sub) {
+            await sendMessage(chatId, `❌ No subscription found for "${target}"`);
+            return;
+        }
+        const currentExpiry = new Date(sub.expires_at);
+        const newExpiry = new Date(currentExpiry.getTime() + days * 24 * 60 * 60 * 1000).toISOString();
+        await supabase.from('prachi_subscriptions').update({ expires_at: newExpiry }).eq('id', sub.id);
+        const expiryFormatted = new Date(newExpiry).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+        await sendMessage(chatId, `✅ Extended <b>${sub.telegram_username || sub.phone}</b>'s subscription by ${days} days.\nNew expiry: ${expiryFormatted}`);
+        if (sub.telegram_user_id) {
+            try {
+                await sendMessage(sub.telegram_user_id,
+                    `🎁 Great news! Your subscription has been extended by <b>${days} days</b>!\n\n📅 New expiry: ${expiryFormatted}`
+                );
+            } catch (_) {}
+        }
+    }
+
+    else if (text.startsWith('/search ')) {
+        const target = text.replace('/search ', '').trim().replace('@', '');
+        const { data: subs } = await supabase.from('prachi_subscriptions')
+            .select('*')
+            .or(`telegram_username.eq.@${target},telegram_username.eq.${target},phone.eq.${target},telegram_user_id.eq.${target}`)
+            .order('id', { ascending: false })
+            .limit(5);
+        if (!subs || subs.length === 0) {
+            await sendMessage(chatId, `❌ No subscription found for "${target}"`);
+            return;
+        }
+        let msg = `🔍 <b>Results for "${target}"</b>\n\n`;
+        for (const s of subs) {
+            const expires = s.expires_at ? new Date(s.expires_at) : null;
+            const daysLeft = expires ? Math.max(0, Math.ceil((expires - Date.now()) / (1000 * 60 * 60 * 24))) : 0;
+            msg += `👤 ${s.telegram_username || s.phone || `ID:${s.telegram_user_id}`}\n`;
+            msg += `📋 Status: <b>${s.status}</b>\n`;
+            msg += `💰 Amount: ₹${s.amount}\n`;
+            if (expires) msg += `📅 Expires: ${expires.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })} (${daysLeft}d left)\n`;
+            msg += `\n`;
+        }
+        await sendMessage(chatId, msg);
+    }
+
     else if (text === '/help') {
         await sendMessage(chatId,
             `🤖 <b>Admin Commands</b>\n\n` +
             `/subscribers — List active subscribers\n` +
             `/expired — List expired/cancelled subs\n` +
             `/stats — Subscription statistics\n` +
-            `/broadcast <message> — Send DM to all active subs\n` +
+            `/broadcast <message> — DM all active subs\n` +
             `/kick <username/phone/id> — Kick & cancel user\n` +
+            `/extend <username> <days> — Add days to a sub\n` +
+            `/search <username/phone> — Look up a user\n` +
             `/help — Show this message`
         );
     }
@@ -422,6 +524,29 @@ async function handleCallbackQuery(callbackQuery) {
             await sendMessage(chatId,
                 '❌ No active subscription found on this account.\n\nIf you believe this is an error, use the Contact Support button. Otherwise, grab your subscription from the website below!',
                 { inline_keyboard: [[{ text: '🛒 Open Website', url: frontendUrl }]] }
+            );
+        }
+    } else if (data === 'renew_status') {
+        const frontendUrl = process.env.FRONTEND_URL || 'https://yourwebsite.com';
+        const { data: sub } = await supabase.from('prachi_subscriptions')
+            .select('*')
+            .eq('telegram_user_id', String(userId))
+            .eq('status', 'active')
+            .order('id', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+        if (sub) {
+            const expires = new Date(sub.expires_at);
+            const daysLeft = Math.max(0, Math.ceil((expires - Date.now()) / (1000 * 60 * 60 * 24)));
+            await sendMessage(chatId,
+                `⏳ <b>Your Subscription</b>\n\n` +
+                `📅 Expires: ${expires.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}\n` +
+                `⏳ Days left: <b>${daysLeft}</b>\n\nTap below to renew! 💳`,
+                { inline_keyboard: [[{ text: '💳 Renew Now', url: frontendUrl }]] }
+            );
+        } else {
+            await sendMessage(chatId, '❌ No active subscription found.',
+                { inline_keyboard: [[{ text: '💳 Get Access', url: frontendUrl }]] }
             );
         }
     } else if (data === 'contact_support') {

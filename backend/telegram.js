@@ -77,6 +77,46 @@ async function sendMessage(chatId, text, replyMarkup = null) {
     return callTelegramAPI('sendMessage', data);
 }
 
+async function createPoll(chatId, question, options) {
+    return callTelegramAPI('sendPoll', {
+        chat_id: chatId,
+        question,
+        options,
+        is_anonymous: true
+    });
+}
+
+async function pinMessage(chatId, messageId) {
+    return callTelegramAPI('pinChatMessage', {
+        chat_id: chatId,
+        message_id: messageId,
+        disable_notification: false
+    });
+}
+
+async function unpinMessage(chatId, messageId) {
+    return callTelegramAPI('unpinChatMessage', {
+        chat_id: chatId,
+        message_id: messageId
+    });
+}
+
+async function postToVipChannel(text, replyMarkup = null) {
+    const channelId = process.env.TELEGRAM_CHANNEL_ID;
+    if (!channelId) throw new Error('TELEGRAM_CHANNEL_ID not set');
+    const data = { chat_id: channelId, text, parse_mode: 'HTML' };
+    if (replyMarkup) data.reply_markup = replyMarkup;
+    return callTelegramAPI('sendMessage', data);
+}
+
+async function sendPhotoToVipChannel(photoUrl, caption, replyMarkup = null) {
+    const channelId = process.env.TELEGRAM_CHANNEL_ID;
+    if (!channelId) throw new Error('TELEGRAM_CHANNEL_ID not set');
+    const data = { chat_id: channelId, photo: photoUrl, caption, parse_mode: 'HTML' };
+    if (replyMarkup) data.reply_markup = replyMarkup;
+    return callTelegramAPI('sendPhoto', data);
+}
+
 async function postToPublicChannel(text, replyMarkup = null) {
     const publicChannelId = process.env.TELEGRAM_PUBLIC_CHANNEL_ID;
     if (!publicChannelId) throw new Error('TELEGRAM_PUBLIC_CHANNEL_ID not set');
@@ -105,6 +145,11 @@ module.exports = {
     createInviteLink,
     sendMessage,
     postToPublicChannel,
+    postToVipChannel,
+    sendPhotoToVipChannel,
     sendTeaserPhoto,
+    createPoll,
+    pinMessage,
+    unpinMessage,
     callTelegramAPI
 };

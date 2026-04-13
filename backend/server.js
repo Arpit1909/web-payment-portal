@@ -143,6 +143,22 @@ app.post('/api/payment/webhook', (req, res) => {
                     status: 'success',
                     paid_at: now
                 });
+                // Notify admins of new subscriber
+                if (process.env.TELEGRAM_BOT_TOKEN) {
+                    const adminIds = (process.env.TELEGRAM_ADMIN_ID || '').split(',').map(s => s.trim()).filter(Boolean);
+                    const expiryFormatted = new Date(expiresAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+                    for (const adminId of adminIds) {
+                        try {
+                            await telegram.sendMessage(adminId,
+                                `💰 <b>New Subscriber!</b>\n\n` +
+                                `📱 Phone: ${updatedSub.phone || 'N/A'}\n` +
+                                `👤 Telegram: ${updatedSub.telegram_username || 'N/A'}\n` +
+                                `💳 Amount: ₹${updatedSub.amount}\n` +
+                                `📅 Expires: ${expiryFormatted}`
+                            );
+                        } catch (_) {}
+                    }
+                }
             }
         })();
     }
@@ -222,6 +238,21 @@ app.get('/api/payment/verify/:paymentRequestId/:paymentId', async (req, res) => 
                 status: 'success',
                 paid_at: now
             });
+            // Notify admins of new subscriber
+            if (process.env.TELEGRAM_BOT_TOKEN) {
+                const adminIds = (process.env.TELEGRAM_ADMIN_ID || '').split(',').map(s => s.trim()).filter(Boolean);
+                const expiryFormatted = new Date(expiresAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+                for (const adminId of adminIds) {
+                    try {
+                        await telegram.sendMessage(adminId,
+                            `💰 <b>New Subscriber!</b>\n\n` +
+                            `📱 Phone: ${result.buyerPhone || 'N/A'}\n` +
+                            `💳 Amount: ₹${amountPaid}\n` +
+                            `📅 Expires: ${expiryFormatted}`
+                        );
+                    } catch (_) {}
+                }
+            }
         }
 
         res.json({ success: true, telegram_url: await getInviteUrl(), expires_at: expiresAt });
@@ -336,46 +367,101 @@ app.get('/api/admin/previews', verifyToken, async (req, res) => {
 });
 
 app.post('/api/admin/previews', verifyToken, async (req, res) => {
-    const { title, url, type, is_locked, order_index } = req.body;
+    const { title, url, type, is_locked, order_index, postDestination } = req.body;
+    // postDestination: 'vip' | 'public' | 'none'
+
     const { data, error } = await supabase.from('prachi_previews').insert({
         title: title || '', url, type: type || 'image', is_locked: is_locked !== undefined ? is_locked : 1, order_index: order_index || 0
     }).select().maybeSingle();
 
     if (error) return res.status(500).json({ error: error.message });
 
-    // Auto-tease post to public channel
-    if (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_PUBLIC_CHANNEL_ID) {
-        const frontendUrl = process.env.FRONTEND_URL || 'https://yourwebsite.com';
-        const contentType = (type || 'image') === 'video' ? '🎬 New Video' : '📸 New Photo';
-        const caption =
-            `${contentType} just dropped in the VIP Channel!\n\n` +
-            `🔒 <b>This content is exclusive to VIP members only.</b>\n\n` +
-            `👇 Tap the button below to get access!`;
-        const keyboard = { inline_keyboard: [[{ text: '🔓 Join VIP Now', url: frontendUrl }]] };
+    const dest = postDestination || 'none';
 
-        if ((type || 'image') === 'image' && url) {
-            // Blur image server-side with sharp, then send permanently blurred version
-            (async () => {
-                const filename = url.replace('/uploads/', '');
-                const inputPath = path.join('uploads', filename);
-                const blurredFilename = `tease-${Date.now()}-${filename}`;
-                const blurredPath = path.join('uploads', blurredFilename);
-                try {
-                    await sharp(inputPath).blur(60).jpeg({ quality: 75 }).toFile(blurredPath);
-                    const photoUrl = `${frontendUrl}/uploads/${blurredFilename}`;
-                    await telegram.sendTeaserPhoto(photoUrl, caption, keyboard);
-                    fs.unlink(blurredPath, () => {}); // clean up temp file
-                } catch (e) {
-                    console.error('[AUTO-TEASE] Blur failed, falling back to text:', e.message);
-                    telegram.postToPublicChannel(caption, keyboard)
-                        .catch(e2 => console.error('[AUTO-TEASE] Text fallback failed:', e2.message));
+    if (dest !== 'none' && process.env.TELEGRAM_BOT_TOKEN) {
+        const frontendUrl = process.env.FRONTEND_URL || 'https://yourwebsite.com';
+        const backendUrl = process.env.BACKEND_URL || frontendUrl;
+        const isImage = (type || 'image') === 'image';
+        const contentType = isImage ? '📸 New Photo' : '🎬 New Video';
+
+        (async () => {
+            try {
+                if (dest === 'vip') {
+                    // --- Post actual content to VIP channel ---
+                    const vipCaption = `${contentType} just dropped! 🔥\n\n<i>Enjoy the exclusive content!</i>`;
+                    if (isImage && url) {
+                        const photoUrl = `${backendUrl}${url}`;
+                        try {
+                            await telegram.sendPhotoToVipChannel(photoUrl, vipCaption);
+                        } catch (e) {
+                            console.error('[POST-VIP] Photo failed, sending text:', e.message);
+                            await telegram.postToVipChannel(vipCaption).catch(() => {});
+                        }
+                    } else {
+                        await telegram.postToVipChannel(vipCaption).catch(() => {});
+                    }
+
+                    // --- DM all active subscribers: new content alert ---
+                    const { data: activeSubs } = await supabase.from('prachi_subscriptions')
+                        .select('telegram_user_id')
+                        .eq('status', 'active')
+                        .gt('expires_at', new Date().toISOString())
+                        .not('telegram_user_id', 'is', null);
+                    if (activeSubs && activeSubs.length > 0) {
+                        for (const s of activeSubs) {
+                            try { await telegram.sendMessage(s.telegram_user_id, `🔥 New content just dropped in the channel! Go check it out! 👇`); } catch (_) {}
+                            await new Promise(r => setTimeout(r, 50));
+                        }
+                    }
+
+                    // --- Also post blurred teaser to public channel ---
+                    if (process.env.TELEGRAM_PUBLIC_CHANNEL_ID) {
+                        const teaserCaption =
+                            `${contentType} just dropped in the VIP Channel!\n\n` +
+                            `🔒 <b>Exclusive to VIP members only.</b>\n\n` +
+                            `👇 Tap below to get access!`;
+                        const keyboard = { inline_keyboard: [[{ text: '🔓 Join VIP Now', url: frontendUrl }]] };
+
+                        if (isImage && url) {
+                            const filename = url.replace('/uploads/', '');
+                            const inputPath = path.join('uploads', filename);
+                            const blurredFilename = `tease-${Date.now()}-${filename}`;
+                            const blurredPath = path.join('uploads', blurredFilename);
+                            try {
+                                await sharp(inputPath).blur(60).jpeg({ quality: 75 }).toFile(blurredPath);
+                                const blurredUrl = `${backendUrl}/uploads/${blurredFilename}`;
+                                await telegram.sendTeaserPhoto(blurredUrl, teaserCaption, keyboard);
+                                fs.unlink(blurredPath, () => {});
+                            } catch (e) {
+                                console.error('[POST-VIP] Blur failed, sending text teaser:', e.message);
+                                telegram.postToPublicChannel(teaserCaption, keyboard).catch(() => {});
+                            }
+                        } else {
+                            telegram.postToPublicChannel(teaserCaption, keyboard).catch(() => {});
+                        }
+                    }
+
+                } else if (dest === 'public') {
+                    // --- Post actual content to public channel (no blur) ---
+                    const publicCaption = `${contentType} just posted! 🎉`;
+                    const keyboard = { inline_keyboard: [[{ text: '🔓 Join VIP Now', url: frontendUrl }]] };
+
+                    if (isImage && url) {
+                        const photoUrl = `${backendUrl}${url}`;
+                        try {
+                            await telegram.sendTeaserPhoto(photoUrl, publicCaption, keyboard);
+                        } catch (e) {
+                            console.error('[POST-PUBLIC] Photo failed, sending text:', e.message);
+                            telegram.postToPublicChannel(publicCaption, keyboard).catch(() => {});
+                        }
+                    } else {
+                        telegram.postToPublicChannel(publicCaption, keyboard).catch(() => {});
+                    }
                 }
-            })();
-        } else {
-            // Video — text-only tease
-            telegram.postToPublicChannel(caption, keyboard)
-                .catch(e => console.error('[AUTO-TEASE] Failed:', e.message));
-        }
+            } catch (e) {
+                console.error('[POST-CHANNEL] Unexpected error:', e.message);
+            }
+        })();
     }
 
     res.json({ success: true, id: data.id });
@@ -592,6 +678,89 @@ cron.schedule('0 * * * *', async () => {
     }
 });
 
+// --- CRON: Win-back DM (3 days after expiry, daily at noon) ---
+cron.schedule('0 12 * * *', async () => {
+    if (!process.env.TELEGRAM_BOT_TOKEN) return;
+    const frontendUrl = process.env.FRONTEND_URL || 'https://yourwebsite.com';
+    const end = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+    const start = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000 - 60 * 60 * 1000).toISOString();
+    const { data: expired } = await supabase.from('prachi_subscriptions')
+        .select('*').in('status', ['expired', 'cancelled'])
+        .gte('expires_at', start).lte('expires_at', end)
+        .not('telegram_user_id', 'is', null);
+    if (expired) {
+        for (const sub of expired) {
+            try {
+                await telegram.sendMessage(sub.telegram_user_id,
+                    `💔 Hey! We miss you!\n\nYour VIP access expired 3 days ago. Come back and enjoy exclusive content again! 😘\n\n✨ Tap below to rejoin:`,
+                    { inline_keyboard: [[{ text: '💳 Come Back!', url: frontendUrl }]] }
+                );
+            } catch (_) {}
+        }
+    }
+    console.log('[CRON] Win-back messages sent');
+});
+
+// --- CRON: Loyalty messages (1 month & 3 month anniversaries, daily at 11am) ---
+cron.schedule('0 11 * * *', async () => {
+    if (!process.env.TELEGRAM_BOT_TOKEN) return;
+    const check = async (days, msg) => {
+        const end = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+        const start = new Date(Date.now() - days * 24 * 60 * 60 * 1000 - 60 * 60 * 1000).toISOString();
+        const { data: subs } = await supabase.from('prachi_subscriptions')
+            .select('*').eq('status', 'active')
+            .gte('started_at', start).lte('started_at', end)
+            .not('telegram_user_id', 'is', null);
+        if (subs) {
+            for (const sub of subs) {
+                try { await telegram.sendMessage(sub.telegram_user_id, msg); } catch (_) {}
+            }
+        }
+    };
+    await check(30, `🎉 Happy 1 Month Anniversary!\n\nYou've been part of our VIP family for a full month now! Thank you so much for your support — it means everything! 💖\n\nHope you're enjoying all the exclusive content! 😘`);
+    await check(90, `👑 3 Months Strong!\n\nYou've been a loyal VIP member for 3 whole months! You're an absolute legend and we love having you here! 💋🔥\n\nThank you from the bottom of my heart! 💖`);
+    console.log('[CRON] Loyalty messages sent');
+});
+
+// --- CRON: Daily morning report to admins (9am) ---
+cron.schedule('0 9 * * *', async () => {
+    if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_ADMIN_ID) return;
+    try {
+        const nowTime = new Date();
+        const nowIso = nowTime.toISOString();
+        const todayStart = new Date(nowTime.setHours(0, 0, 0, 0)).toISOString();
+        const { data: allSubs } = await supabase.from('prachi_subscriptions').select('*');
+        if (!allSubs) return;
+        let active = 0, expired = 0, cancelled = 0, revenue = 0, newToday = 0;
+        const expiringToday = [];
+        allSubs.forEach(s => {
+            if (s.status === 'active' && new Date(s.expires_at) > new Date()) {
+                active++; revenue += s.amount || 0;
+                if (new Date(s.expires_at) < new Date(Date.now() + 24 * 60 * 60 * 1000)) {
+                    expiringToday.push(s.telegram_username || s.phone || `#${s.id}`);
+                }
+            }
+            if (s.status === 'expired') expired++;
+            if (s.status === 'cancelled') cancelled++;
+            if (s.started_at && s.started_at >= todayStart) newToday++;
+        });
+        const msg =
+            `📊 <b>Daily Report — ${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</b>\n\n` +
+            `✅ Active: <b>${active}</b>\n` +
+            `🆕 New today: <b>${newToday}</b>\n` +
+            `🕐 Expired: ${expired} | ❌ Cancelled: ${cancelled}\n` +
+            `💰 Active revenue: ₹${revenue}\n` +
+            (expiringToday.length > 0 ? `\n⚠️ <b>Expiring in 24h:</b>\n${expiringToday.slice(0, 10).map(n => `• ${n}`).join('\n')}` : `\n✅ No expiries in next 24h`);
+        const adminIds = (process.env.TELEGRAM_ADMIN_ID || '').split(',').map(s => s.trim()).filter(Boolean);
+        for (const adminId of adminIds) {
+            try { await telegram.sendMessage(adminId, msg); } catch (_) {}
+        }
+        console.log('[CRON] Daily report sent');
+    } catch (e) {
+        console.error('[CRON] Daily report failed:', e.message);
+    }
+});
+
 // --- CRON: Weekly subscriber count post to public channel (every Monday 10am) ---
 cron.schedule('0 10 * * 1', async () => {
     if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_PUBLIC_CHANNEL_ID) return;
@@ -618,6 +787,135 @@ cron.schedule('0 10 * * 1', async () => {
         console.log('[CRON] Weekly subscriber count posted to public channel');
     } catch (e) {
         console.error('[CRON] Weekly post failed:', e.message);
+    }
+});
+
+// --- TELEGRAM TOOLS ---
+
+// Post a poll to VIP or public channel
+app.post('/api/admin/post-poll', verifyToken, async (req, res) => {
+    const { question, options, channel } = req.body;
+    if (!question || !options || options.length < 2) return res.status(400).json({ error: 'Question and at least 2 options required' });
+    const channelId = channel === 'vip' ? process.env.TELEGRAM_CHANNEL_ID : process.env.TELEGRAM_PUBLIC_CHANNEL_ID;
+    if (!channelId) return res.status(400).json({ error: 'Channel ID not configured' });
+    try {
+        await telegram.createPoll(channelId, question, options);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Post a countdown teaser to public channel (with optional pin)
+app.post('/api/admin/post-countdown', verifyToken, async (req, res) => {
+    const { hours, message } = req.body;
+    if (!hours) return res.status(400).json({ error: 'Hours required' });
+    const frontendUrl = process.env.FRONTEND_URL || 'https://yourwebsite.com';
+    const msg =
+        `⏰ <b>Something drops in ${hours} hour${hours > 1 ? 's' : ''}!</b>\n\n` +
+        `${message || '👀 Stay tuned for something exclusive...'}\n\n` +
+        `<i>VIP members only! 🔒</i>`;
+    const keyboard = { inline_keyboard: [[{ text: '🔓 Join VIP Now', url: frontendUrl }]] };
+    try {
+        const result = await telegram.postToPublicChannel(msg, keyboard);
+        if (result.ok && result.result && process.env.TELEGRAM_PUBLIC_CHANNEL_ID) {
+            try { await telegram.pinMessage(process.env.TELEGRAM_PUBLIC_CHANNEL_ID, result.result.message_id); } catch (_) {}
+        }
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// --- POST SCHEDULER ---
+const scheduledPosts = [];
+
+app.post('/api/admin/schedule-post', verifyToken, (req, res) => {
+    const { message, channel, scheduledAt, countdownHours, countdownMessage } = req.body;
+    if (!message || !scheduledAt) return res.status(400).json({ error: 'Message and scheduledAt required' });
+    const id = Date.now();
+    scheduledPosts.push({ id, message, channel: channel || 'vip', scheduledAt, countdownHours: countdownHours || null, countdownMessage: countdownMessage || '', sent: false, countdownSent: false, pinnedMessageId: null });
+    console.log(`[SCHEDULER] Post scheduled for ${scheduledAt} → ${channel}`);
+    res.json({ success: true, id });
+});
+
+app.get('/api/admin/scheduled-posts', verifyToken, (req, res) => {
+    res.json(scheduledPosts.filter(p => !p.sent));
+});
+
+app.delete('/api/admin/scheduled-posts/:id', verifyToken, (req, res) => {
+    const idx = scheduledPosts.findIndex(p => p.id === parseInt(req.params.id));
+    if (idx !== -1) scheduledPosts.splice(idx, 1);
+    res.json({ success: true });
+});
+
+// --- CRON: Scheduler check (every minute) ---
+cron.schedule('* * * * *', async () => {
+    const now = new Date();
+    const frontendUrl = process.env.FRONTEND_URL || 'https://yourwebsite.com';
+
+    for (const post of scheduledPosts) {
+        if (post.sent) continue;
+        const scheduledTime = new Date(post.scheduledAt);
+
+        // Send countdown if not yet sent
+        if (post.countdownHours && !post.countdownSent) {
+            const countdownTime = new Date(scheduledTime.getTime() - post.countdownHours * 60 * 60 * 1000);
+            if (now >= countdownTime) {
+                const cdMsg =
+                    `⏰ <b>Something drops in ${post.countdownHours} hour${post.countdownHours > 1 ? 's' : ''}!</b>\n\n` +
+                    `${post.countdownMessage || '👀 Stay tuned for something exclusive...'}\n\n` +
+                    `<i>VIP members only! 🔒</i>`;
+                const keyboard = { inline_keyboard: [[{ text: '🔓 Join VIP Now', url: frontendUrl }]] };
+                try {
+                    const result = await telegram.postToPublicChannel(cdMsg, keyboard);
+                    if (result.ok && result.result && process.env.TELEGRAM_PUBLIC_CHANNEL_ID) {
+                        try { await telegram.pinMessage(process.env.TELEGRAM_PUBLIC_CHANNEL_ID, result.result.message_id); post.pinnedMessageId = result.result.message_id; } catch (_) {}
+                    }
+                    post.countdownSent = true;
+                    console.log(`[SCHEDULER] Countdown posted for scheduled post #${post.id}`);
+                } catch (e) {
+                    console.error('[SCHEDULER] Countdown failed:', e.message);
+                }
+            }
+        }
+
+        // Send main post when due
+        if (now >= scheduledTime) {
+            try {
+                if (post.channel === 'vip') {
+                    await telegram.postToVipChannel(post.message);
+                    // DM all active subscribers
+                    const { data: subs } = await supabase.from('prachi_subscriptions')
+                        .select('telegram_user_id').eq('status', 'active')
+                        .gt('expires_at', now.toISOString()).not('telegram_user_id', 'is', null);
+                    if (subs) {
+                        for (const s of subs) {
+                            try { await telegram.sendMessage(s.telegram_user_id, `🔥 New content just dropped in the channel! Go check it out! 👇`); } catch (_) {}
+                            await new Promise(r => setTimeout(r, 50));
+                        }
+                    }
+                } else {
+                    await telegram.postToPublicChannel(post.message, { inline_keyboard: [[{ text: '🔓 Join VIP Now', url: frontendUrl }]] });
+                }
+                // Unpin countdown if it was pinned
+                if (post.pinnedMessageId && process.env.TELEGRAM_PUBLIC_CHANNEL_ID) {
+                    try { await telegram.unpinMessage(process.env.TELEGRAM_PUBLIC_CHANNEL_ID, post.pinnedMessageId); } catch (_) {}
+                }
+                post.sent = true;
+                console.log(`[SCHEDULER] Post #${post.id} sent to ${post.channel}`);
+            } catch (e) {
+                console.error('[SCHEDULER] Post failed:', e.message);
+            }
+        }
+    }
+
+    // Clean up sent posts older than 1 hour
+    const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+    for (let i = scheduledPosts.length - 1; i >= 0; i--) {
+        if (scheduledPosts[i].sent && new Date(scheduledPosts[i].scheduledAt) < oneHourAgo) {
+            scheduledPosts.splice(i, 1);
+        }
     }
 });
 

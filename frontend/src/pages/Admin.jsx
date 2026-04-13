@@ -4,7 +4,7 @@ import {
     Settings, LogOut, LayoutDashboard, Image as ImageIcon,
     Upload, Trash2, Tag, Type, Lock, CheckCircle2,
     AlertCircle, Crown, Users, Video, DollarSign,
-    Globe, MessageSquare, User, Camera, Clock, Send, BarChart2, Wrench
+    Globe, MessageSquare, User, Camera, Clock, Send, BarChart2, Wrench, Calendar, Plus, X
 } from 'lucide-react';
 
 /* ===========================
@@ -123,6 +123,25 @@ export default function Admin() {
     });
 
     const [previews, setPreviews] = useState([]);
+    const [postDestination, setPostDestination] = useState('none');
+
+    // Telegram Tools state
+    const [pollQuestion, setPollQuestion] = useState('');
+    const [pollOptions, setPollOptions] = useState(['', '']);
+    const [pollChannel, setPollChannel] = useState('vip');
+    const [pollLoading, setPollLoading] = useState(false);
+
+    const [countdownHours, setCountdownHours] = useState('24');
+    const [countdownMessage, setCountdownMessage] = useState('');
+    const [countdownLoading, setCountdownLoading] = useState(false);
+
+    const [scheduleMsg, setScheduleMsg] = useState('');
+    const [scheduleChannel, setScheduleChannel] = useState('vip');
+    const [scheduleAt, setScheduleAt] = useState('');
+    const [scheduleCountdownHours, setScheduleCountdownHours] = useState('');
+    const [scheduleCountdownMsg, setScheduleCountdownMsg] = useState('');
+    const [scheduledPosts, setScheduledPosts] = useState([]);
+    const [scheduleLoading, setScheduleLoading] = useState(false);
     const [subscriptions, setSubscriptions] = useState([]);
     const [subStats, setSubStats] = useState({ total: 0, active: 0, cancelled: 0, expired: 0 });
     const fileInputRef = useRef(null);
@@ -140,13 +159,15 @@ export default function Admin() {
 
     useEffect(() => {
         let interval;
-        if (token) { 
-            fetchSettings(); 
-            fetchPreviews(); 
-            fetchSubscriptions(); 
+        if (token) {
+            fetchSettings();
+            fetchPreviews();
+            fetchSubscriptions();
+            fetchScheduledPosts();
             interval = setInterval(() => {
                 fetchPreviews();
                 fetchSubscriptions();
+                fetchScheduledPosts();
             }, 5000);
         }
         return () => { if (interval) clearInterval(interval); };
@@ -451,10 +472,15 @@ export default function Admin() {
                         url: uploadData.url,
                         type: isVideo ? 'video' : 'image',
                         is_locked: 1,
-                        order_index: previews.length
+                        order_index: previews.length,
+                        postDestination
                     })
                 });
-                if (addRes.ok) { showNotify('Media added to gallery!'); fetchPreviews(); }
+                if (addRes.ok) {
+                    const destLabel = postDestination === 'vip' ? 'Posted to VIP + teaser to public!' : postDestination === 'public' ? 'Posted to public channel!' : 'Media added to gallery!';
+                    showNotify(destLabel);
+                    fetchPreviews();
+                }
             } else {
                 showNotify('Upload failed.', 'error');
             }
@@ -476,6 +502,75 @@ export default function Admin() {
         } catch {
             showNotify('Delete error.', 'error');
         }
+    };
+
+    const fetchScheduledPosts = async () => {
+        try {
+            const res = await fetch(`${API_BASE}/api/admin/scheduled-posts`, { headers: { 'Authorization': `Bearer ${token}` } });
+            if (res.ok) setScheduledPosts(await res.json());
+        } catch {}
+    };
+
+    const handlePostPoll = async () => {
+        const filled = pollOptions.filter(o => o.trim());
+        if (!pollQuestion.trim() || filled.length < 2) { showNotify('Add a question and at least 2 options.', 'error'); return; }
+        setPollLoading(true);
+        try {
+            const res = await fetch(`${API_BASE}/api/admin/post-poll`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ question: pollQuestion, options: filled, channel: pollChannel })
+            });
+            if (res.ok) { showNotify('Poll posted!'); setPollQuestion(''); setPollOptions(['', '']); }
+            else { const d = await res.json(); showNotify(d.error || 'Failed', 'error'); }
+        } catch { showNotify('Error posting poll.', 'error'); }
+        setPollLoading(false);
+    };
+
+    const handlePostCountdown = async () => {
+        if (!countdownHours) { showNotify('Enter hours.', 'error'); return; }
+        setCountdownLoading(true);
+        try {
+            const res = await fetch(`${API_BASE}/api/admin/post-countdown`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ hours: parseInt(countdownHours), message: countdownMessage })
+            });
+            if (res.ok) { showNotify('Countdown posted & pinned!'); setCountdownMessage(''); }
+            else { const d = await res.json(); showNotify(d.error || 'Failed', 'error'); }
+        } catch { showNotify('Error.', 'error'); }
+        setCountdownLoading(false);
+    };
+
+    const handleSchedulePost = async () => {
+        if (!scheduleMsg.trim() || !scheduleAt) { showNotify('Message and date/time required.', 'error'); return; }
+        setScheduleLoading(true);
+        try {
+            const res = await fetch(`${API_BASE}/api/admin/schedule-post`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({
+                    message: scheduleMsg, channel: scheduleChannel,
+                    scheduledAt: new Date(scheduleAt).toISOString(),
+                    countdownHours: scheduleCountdownHours ? parseInt(scheduleCountdownHours) : null,
+                    countdownMessage: scheduleCountdownMsg
+                })
+            });
+            if (res.ok) {
+                showNotify('Post scheduled!');
+                setScheduleMsg(''); setScheduleAt(''); setScheduleCountdownHours(''); setScheduleCountdownMsg('');
+                fetchScheduledPosts();
+            } else { const d = await res.json(); showNotify(d.error || 'Failed', 'error'); }
+        } catch { showNotify('Error.', 'error'); }
+        setScheduleLoading(false);
+    };
+
+    const handleDeleteScheduled = async (id) => {
+        try {
+            await fetch(`${API_BASE}/api/admin/scheduled-posts/${id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
+            fetchScheduledPosts();
+            showNotify('Scheduled post removed.');
+        } catch { showNotify('Error.', 'error'); }
     };
 
     const handleLogout = () => {
@@ -550,6 +645,7 @@ export default function Admin() {
         { id: 'pricing', label: 'Pricing & Timer', icon: <Tag size={17} /> },
         { id: 'gallery', label: 'Media Gallery', icon: <ImageIcon size={17} /> },
         { id: 'subscriptions', label: 'Subscriptions', icon: <Users size={17} /> },
+        { id: 'telegram-tools', label: 'Telegram Tools', icon: <MessageSquare size={17} /> },
     ];
 
     // Compute Metrics safely
@@ -1163,6 +1259,42 @@ export default function Admin() {
                                 </div>
                             </div>
                             <div className="admin-section-body">
+                                <div style={{ marginBottom: '1rem' }}>
+                                    <p style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Post to Telegram</p>
+                                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                        {[
+                                            { value: 'none', label: '🚫 Don\'t Post' },
+                                            { value: 'vip', label: '💎 VIP Channel' },
+                                            { value: 'public', label: '📢 Public Channel' },
+                                        ].map(opt => (
+                                            <button
+                                                key={opt.value}
+                                                onClick={() => setPostDestination(opt.value)}
+                                                style={{
+                                                    padding: '0.4rem 0.9rem',
+                                                    borderRadius: '8px',
+                                                    border: postDestination === opt.value ? '2px solid var(--gold)' : '2px solid var(--border)',
+                                                    background: postDestination === opt.value ? 'rgba(229,165,75,0.15)' : 'var(--surface)',
+                                                    color: postDestination === opt.value ? 'var(--gold)' : 'var(--text-secondary)',
+                                                    fontWeight: 600,
+                                                    fontSize: '0.82rem',
+                                                    cursor: 'pointer',
+                                                    transition: 'all 0.15s'
+                                                }}
+                                            >{opt.label}</button>
+                                        ))}
+                                    </div>
+                                    {postDestination === 'vip' && (
+                                        <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
+                                            Posts actual content to VIP channel + auto blurred teaser to public channel
+                                        </p>
+                                    )}
+                                    {postDestination === 'public' && (
+                                        <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
+                                            Posts content to public channel without blur
+                                        </p>
+                                    )}
+                                </div>
                                 <div
                                     className="upload-box"
                                     onClick={() => fileInputRef.current?.click()}
@@ -1390,6 +1522,142 @@ export default function Admin() {
                                 <p style={{ marginTop: '0.5rem' }}><strong style={{ color: 'var(--text-primary)' }}>Renewal:</strong> Users must pay again each month to rejoin. They receive a notification when access is removed.</p>
                             </div>
                         </div>
+                    </>
+                )}
+
+                {/* ── Telegram Tools ── */}
+                {activeTab === 'telegram-tools' && (
+                    <>
+                        <div className="admin-page-header">
+                            <div>
+                                <h1 className="admin-page-title">Telegram Tools</h1>
+                                <p className="admin-page-subtitle">Polls, countdowns, and scheduled posts</p>
+                            </div>
+                        </div>
+
+                        {/* Poll Creator */}
+                        <SectionCard title="Post a Poll" icon={<BarChart2 size={16} color="var(--gold)" />}>
+                            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
+                                {['vip', 'public'].map(ch => (
+                                    <button key={ch} onClick={() => setPollChannel(ch)} style={{
+                                        padding: '0.4rem 0.9rem', borderRadius: '8px', cursor: 'pointer', fontWeight: 600, fontSize: '0.82rem', transition: 'all 0.15s',
+                                        border: pollChannel === ch ? '2px solid var(--gold)' : '2px solid var(--border)',
+                                        background: pollChannel === ch ? 'rgba(229,165,75,0.15)' : 'var(--surface)',
+                                        color: pollChannel === ch ? 'var(--gold)' : 'var(--text-secondary)'
+                                    }}>{ch === 'vip' ? '💎 VIP Channel' : '📢 Public Channel'}</button>
+                                ))}
+                            </div>
+                            <input className="input-elegant" placeholder="Poll question..." value={pollQuestion} onChange={e => setPollQuestion(e.target.value)} style={{ marginBottom: '0.75rem' }} />
+                            {pollOptions.map((opt, i) => (
+                                <div key={i} style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem', alignItems: 'center' }}>
+                                    <input className="input-elegant" placeholder={`Option ${i + 1}`} value={opt} onChange={e => { const o = [...pollOptions]; o[i] = e.target.value; setPollOptions(o); }} style={{ flex: 1 }} />
+                                    {pollOptions.length > 2 && (
+                                        <button onClick={() => setPollOptions(pollOptions.filter((_, j) => j !== i))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--rose)' }}><X size={16} /></button>
+                                    )}
+                                </div>
+                            ))}
+                            {pollOptions.length < 10 && (
+                                <button onClick={() => setPollOptions([...pollOptions, ''])} style={{ background: 'none', border: '1px dashed var(--border)', borderRadius: '8px', padding: '0.4rem 0.8rem', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '0.82rem', marginBottom: '1rem' }}>
+                                    <Plus size={14} style={{ marginRight: '0.3rem' }} /> Add Option
+                                </button>
+                            )}
+                            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                                <button className="btn-gold" onClick={handlePostPoll} disabled={pollLoading}>
+                                    {pollLoading ? <><Spinner light /> Posting...</> : <><BarChart2 size={15} /> Post Poll</>}
+                                </button>
+                            </div>
+                        </SectionCard>
+
+                        {/* Countdown Teaser */}
+                        <SectionCard title="Countdown Teaser (to Public Channel)" icon={<Clock size={16} color="var(--gold)" />}>
+                            <p style={{ fontSize: '0.83rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+                                Posts a countdown message to the public channel and <b>pins it</b> so everyone sees it.
+                            </p>
+                            <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+                                <div style={{ flex: '0 0 120px' }}>
+                                    <label className="form-label">Hours from now</label>
+                                    <input className="input-elegant" type="number" min="1" value={countdownHours} onChange={e => setCountdownHours(e.target.value)} placeholder="24" />
+                                </div>
+                                <div style={{ flex: 1, minWidth: '200px' }}>
+                                    <label className="form-label">Teaser message (optional)</label>
+                                    <input className="input-elegant" value={countdownMessage} onChange={e => setCountdownMessage(e.target.value)} placeholder="Something special is coming 👀" />
+                                </div>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                                <button className="btn-gold" onClick={handlePostCountdown} disabled={countdownLoading}>
+                                    {countdownLoading ? <><Spinner light /> Posting...</> : <><Clock size={15} /> Post & Pin Countdown</>}
+                                </button>
+                            </div>
+                        </SectionCard>
+
+                        {/* Post Scheduler */}
+                        <SectionCard title="Schedule a Post" icon={<Calendar size={16} color="var(--gold)" />}>
+                            <p style={{ fontSize: '0.83rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+                                Schedule a post to auto-send at a specific time. Optionally add a countdown teaser that gets pinned in the public channel beforehand, then unpinned when the post goes live.
+                            </p>
+                            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
+                                {['vip', 'public'].map(ch => (
+                                    <button key={ch} onClick={() => setScheduleChannel(ch)} style={{
+                                        padding: '0.4rem 0.9rem', borderRadius: '8px', cursor: 'pointer', fontWeight: 600, fontSize: '0.82rem', transition: 'all 0.15s',
+                                        border: scheduleChannel === ch ? '2px solid var(--gold)' : '2px solid var(--border)',
+                                        background: scheduleChannel === ch ? 'rgba(229,165,75,0.15)' : 'var(--surface)',
+                                        color: scheduleChannel === ch ? 'var(--gold)' : 'var(--text-secondary)'
+                                    }}>{ch === 'vip' ? '💎 VIP Channel' : '📢 Public Channel'}</button>
+                                ))}
+                            </div>
+                            <textarea className="input-elegant" rows={3} value={scheduleMsg} onChange={e => setScheduleMsg(e.target.value)} placeholder="Write your post message..." style={{ marginBottom: '0.75rem' }} />
+                            <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+                                <div style={{ flex: 1, minWidth: '200px' }}>
+                                    <label className="form-label">Schedule date & time</label>
+                                    <input className="input-elegant" type="datetime-local" value={scheduleAt} onChange={e => setScheduleAt(e.target.value)} />
+                                </div>
+                            </div>
+                            <div style={{ background: 'rgba(229,165,75,0.05)', border: '1px solid rgba(229,165,75,0.15)', borderRadius: '10px', padding: '0.9rem', marginBottom: '1rem' }}>
+                                <p style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--gold)', marginBottom: '0.5rem' }}>⏰ Auto Countdown (optional)</p>
+                                <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                                    <div style={{ flex: '0 0 160px' }}>
+                                        <label className="form-label">Hours before post to tease</label>
+                                        <input className="input-elegant" type="number" min="1" value={scheduleCountdownHours} onChange={e => setScheduleCountdownHours(e.target.value)} placeholder="e.g. 24" />
+                                    </div>
+                                    <div style={{ flex: 1, minWidth: '180px' }}>
+                                        <label className="form-label">Countdown teaser message</label>
+                                        <input className="input-elegant" value={scheduleCountdownMsg} onChange={e => setScheduleCountdownMsg(e.target.value)} placeholder="Something big drops soon 👀" />
+                                    </div>
+                                </div>
+                                <p style={{ fontSize: '0.73rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>Countdown gets pinned to public channel, unpinned when post goes live.</p>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                                <button className="btn-gold" onClick={handleSchedulePost} disabled={scheduleLoading}>
+                                    {scheduleLoading ? <><Spinner light /> Scheduling...</> : <><Calendar size={15} /> Schedule Post</>}
+                                </button>
+                            </div>
+                        </SectionCard>
+
+                        {/* Upcoming Scheduled Posts */}
+                        <SectionCard title={`Upcoming Scheduled Posts (${scheduledPosts.length})`} icon={<Clock size={16} color="var(--text-secondary)" />}>
+                            {scheduledPosts.length === 0 ? (
+                                <div style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--text-muted)' }}>
+                                    <Calendar size={28} style={{ marginBottom: '0.5rem', opacity: 0.3 }} />
+                                    <p>No scheduled posts.</p>
+                                </div>
+                            ) : (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                                    {scheduledPosts.map(p => (
+                                        <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', background: 'var(--surface)', borderRadius: '10px', padding: '0.75rem 1rem', border: '1px solid var(--border)', gap: '0.75rem' }}>
+                                            <div style={{ flex: 1, minWidth: 0 }}>
+                                                <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.3rem', flexWrap: 'wrap' }}>
+                                                    <span style={{ fontSize: '0.72rem', fontWeight: 700, padding: '0.1rem 0.5rem', borderRadius: '4px', background: p.channel === 'vip' ? 'rgba(229,165,75,0.15)' : 'rgba(168,85,247,0.15)', color: p.channel === 'vip' ? 'var(--gold)' : 'var(--purple)' }}>{p.channel === 'vip' ? '💎 VIP' : '📢 Public'}</span>
+                                                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>📅 {new Date(p.scheduledAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+                                                    {p.countdownHours && <span style={{ fontSize: '0.72rem', color: 'var(--gold)' }}>⏰ Countdown {p.countdownHours}h before</span>}
+                                                </div>
+                                                <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.message}</p>
+                                            </div>
+                                            <button onClick={() => handleDeleteScheduled(p.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--rose)', padding: '0.2rem' }}><Trash2 size={15} /></button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </SectionCard>
                     </>
                 )}
 

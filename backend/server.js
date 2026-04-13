@@ -342,10 +342,16 @@ app.get('/api/admin/settings', verifyToken, async (req, res) => {
 // Update Settings
 app.put('/api/admin/settings', verifyToken, async (req, res) => {
     const updateData = req.body;
-    const { data: latest } = await supabase.from('prachi_settings').select('id').order('id', { ascending: false }).limit(1).maybeSingle();
-    
+    // Fetch full existing row so we know which columns actually exist
+    const { data: latest } = await supabase.from('prachi_settings').select('*').order('id', { ascending: false }).limit(1).maybeSingle();
+
     if (latest) {
-        const { error } = await supabase.from('prachi_settings').update(updateData).eq('id', latest.id);
+        // Only include keys that already exist in the table (prevents "column does not exist" errors)
+        const safeUpdate = {};
+        for (const key of Object.keys(updateData)) {
+            if (key in latest) safeUpdate[key] = updateData[key];
+        }
+        const { error } = await supabase.from('prachi_settings').update(safeUpdate).eq('id', latest.id);
         if (error) return res.status(500).json({ error: error.message });
     } else {
         await supabase.from('prachi_settings').insert(updateData);

@@ -4,7 +4,15 @@ require('dotenv').config();
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const CHANNEL_ID = process.env.TELEGRAM_CHANNEL_ID;
+const PUBLIC_CHANNEL_ID = process.env.TELEGRAM_PUBLIC_CHANNEL_ID || '';
 const ADMIN_IDS = (process.env.TELEGRAM_ADMIN_ID || '').split(',').map(s => s.trim()).filter(Boolean);
+
+function matchesChannel(chatId, channelId) {
+    if (!channelId) return false;
+    // Handle @username format — strip @ and compare username
+    const clean = (v) => String(v).replace(/^@/, '').toLowerCase();
+    return String(chatId) === String(channelId) || clean(chatId) === clean(channelId);
+}
 
 let lastUpdateId = 0;
 let polling = false;
@@ -17,7 +25,7 @@ async function handleNewChatMember(update) {
     const msg = update.chat_member || update.message;
     if (!msg) return;
 
-    let userId, username, chatId;
+    let userId, username, chatId, chatUsername;
 
     if (update.chat_member) {
         const newMember = update.chat_member.new_chat_member;
@@ -25,16 +33,44 @@ async function handleNewChatMember(update) {
         userId = newMember.user.id;
         username = newMember.user.username || '';
         chatId = update.chat_member.chat.id;
+        chatUsername = update.chat_member.chat.username || '';
     } else if (msg.new_chat_members) {
         for (const member of msg.new_chat_members) {
             if (member.is_bot) continue;
             userId = member.id;
             username = member.username || '';
             chatId = msg.chat.id;
+            chatUsername = msg.chat.username || '';
         }
     }
 
-    if (!userId || String(chatId) !== String(CHANNEL_ID)) return;
+    if (!userId) return;
+
+    const frontendUrl = process.env.FRONTEND_URL || 'https://yourwebsite.com';
+
+    // --- PUBLIC CHANNEL: send welcome with website link ---
+    if (matchesChannel(chatId, PUBLIC_CHANNEL_ID) || matchesChannel(chatUsername, PUBLIC_CHANNEL_ID)) {
+        console.log(`[BOT] User @${username || userId} joined public channel`);
+        try {
+            await sendMessage(userId,
+                `👋 <b>Hey! Welcome to our community!</b>\n\n` +
+                `Thanks for joining our public channel. 🎉\n\n` +
+                `We post exclusive teasers, updates, and announcements here — but the <b>real content</b> is inside our private VIP channel.\n\n` +
+                `💎 Join VIP to unlock:\n` +
+                `• Full exclusive photos & videos\n` +
+                `• Direct access to private content\n` +
+                `• Early drops & special offers\n\n` +
+                `<i>Tap below to get access now! 👇</i>`,
+                { inline_keyboard: [[{ text: '🔓 Get VIP Access', url: frontendUrl }]] }
+            );
+        } catch (e) {
+            console.error(`[BOT] Public welcome failed for ${userId}:`, e.message);
+        }
+        return;
+    }
+
+    // --- VIP CHANNEL: verify subscription then send welcome ---
+    if (!matchesChannel(chatId, CHANNEL_ID)) return;
 
     const now = new Date().toISOString();
 
@@ -58,11 +94,12 @@ async function handleNewChatMember(update) {
             .maybeSingle();
 
         if (!subByUsername) {
-            console.log(`[BOT] Unverified user joined: ${username || userId} — kicking`);
+            console.log(`[BOT] Unverified user joined VIP: ${username || userId} — kicking`);
             try {
                 await kickUser(userId);
                 await sendMessage(userId,
-                    '🚫 You do not have an active subscription.\n\nPlease purchase a subscription first to access the private channel.'
+                    '🚫 You do not have an active subscription.\n\nPlease purchase a subscription first to access the private channel.',
+                    { inline_keyboard: [[{ text: '💳 Get Access', url: frontendUrl }]] }
                 );
             } catch (e) {
                 console.error(`[BOT] Kick failed for ${userId}:`, e.message);
@@ -76,26 +113,23 @@ async function handleNewChatMember(update) {
         if (!sub.telegram_user_id) {
             await supabase.from('prachi_subscriptions').update({ telegram_user_id: String(userId) }).eq('id', sub.id);
         }
-        console.log(`[BOT] Verified user joined: ${username || userId} (sub #${sub.id})`);
+        console.log(`[BOT] Verified user joined VIP: ${username || userId} (sub #${sub.id})`);
     }
 
-    // --- SEND WELCOME MESSAGE ---
+    // --- VIP WELCOME MESSAGE ---
     try {
-        const frontendUrl = process.env.FRONTEND_URL || 'https://yourwebsite.com';
-        const welcomeText =
-            `🎉 <b>Welcome to the Exclusive VIP Channel!</b>\n\n` +
-            `Thank you for subscribing — you now have full access to all exclusive content! 🥳\n\n` +
-            `📌 <b>Important Rules:</b>\n` +
+        await sendMessage(userId,
+            `🎉 <b>Hi! Welcome to the VIP Channel!</b>\n\n` +
+            `Thanks for subscribing — you now have full access to all exclusive content! 💖\n\n` +
+            `📌 <b>Quick Reminders:</b>\n` +
             `• No screenshots or screen recording\n` +
-            `• Respect the privacy of all content\n` +
-            `• Enjoy and have fun! 💖\n\n` +
-            `<i>Need help or want to renew? Tap the button below or just message me here anytime.</i>`;
-
-        await sendMessage(userId, welcomeText, {
-            inline_keyboard: [[{ text: '🌐 Visit Website', url: frontendUrl }]]
-        });
+            `• Keep all content private\n` +
+            `• Enjoy and have fun! 🔥\n\n` +
+            `<i>Need help or want to renew? Just message me anytime!</i>`,
+            { inline_keyboard: [[{ text: '🌐 Visit Website', url: frontendUrl }]] }
+        );
     } catch (e) {
-        console.error(`[BOT] Failed to send welcome message to ${userId}:`, e.message);
+        console.error(`[BOT] VIP welcome failed for ${userId}:`, e.message);
     }
 }
 

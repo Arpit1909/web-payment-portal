@@ -22,6 +22,36 @@ let cachedBotUsername = process.env.TELEGRAM_BOT_USERNAME || '';
 // key: `${userId}_${chatId}`, value: messageId
 const welcomeMessageIds = new Map();
 
+// Persistent store for welcome messages so we can fix their button URLs on restart
+const WELCOME_STORE_PATH = require('path').join(__dirname, 'welcome_msgs.json');
+
+function loadWelcomeStore() {
+    try {
+        if (require('fs').existsSync(WELCOME_STORE_PATH)) {
+            return JSON.parse(require('fs').readFileSync(WELCOME_STORE_PATH, 'utf8'));
+        }
+    } catch (_) {}
+    return [];
+}
+
+function saveWelcomeStore(entries) {
+    try { require('fs').writeFileSync(WELCOME_STORE_PATH, JSON.stringify(entries)); } catch (_) {}
+}
+
+function addToWelcomeStore(chatId, messageId, type) {
+    const entries = loadWelcomeStore();
+    // Avoid duplicates
+    if (!entries.find(e => e.chatId == chatId && e.messageId == messageId)) {
+        entries.push({ chatId, messageId, type }); // type: 'vip' or 'public'
+        saveWelcomeStore(entries);
+    }
+}
+
+function removeFromWelcomeStore(chatId, messageId) {
+    const entries = loadWelcomeStore().filter(e => !(e.chatId == chatId && e.messageId == messageId));
+    saveWelcomeStore(entries);
+}
+
 function isAdmin(userId) {
     return ADMIN_IDS.includes(String(userId));
 }
@@ -45,6 +75,7 @@ async function handleNewChatMember(update) {
             if (msgId) {
                 try { await deleteMessage(leftChatId, msgId); } catch (_) {}
                 welcomeMessageIds.delete(key);
+                removeFromWelcomeStore(leftChatId, msgId);
             }
             return;
         }
@@ -89,7 +120,10 @@ async function handleNewChatMember(update) {
                     ]
                 }
             );
-            if (res.ok && res.result) welcomeMessageIds.set(`${userId}_${chatId}`, res.result.message_id);
+            if (res.ok && res.result) {
+                welcomeMessageIds.set(`${userId}_${chatId}`, res.result.message_id);
+                addToWelcomeStore(chatId, res.result.message_id, 'public');
+            }
         } catch (e) {
             console.error(`[BOT] Public welcome failed for ${userId}:`, e.message);
         }
@@ -159,7 +193,10 @@ async function handleNewChatMember(update) {
                 ]
             }
         );
-        if (res.ok && res.result) welcomeMessageIds.set(`${userId}_${chatId}`, res.result.message_id);
+        if (res.ok && res.result) {
+            welcomeMessageIds.set(`${userId}_${chatId}`, res.result.message_id);
+            addToWelcomeStore(chatId, res.result.message_id, 'vip');
+        }
     } catch (e) {
         console.error(`[BOT] VIP welcome failed for ${userId}:`, e.message);
     }
@@ -319,17 +356,18 @@ async function handleCommand(message) {
     // --- Admin commands ---
     const now = new Date().toISOString();
 
-    if (text === '/start' || text.startsWith('/start ')) {
+    if (text === '/start' || text.startsWith('/start ') || text === '/menu') {
         await sendMessage(chatId,
-            `👑 <b>Admin Panel — Bot Commands</b>\n\n` +
-            `📋 /subscribers — List all active VIP members\n` +
-            `🕐 /expired — List expired &amp; cancelled subs\n` +
-            `📊 /stats — Revenue &amp; subscriber statistics\n` +
-            `📢 /broadcast &lt;msg&gt; — DM all active subscribers\n` +
-            `👢 /kick &lt;username/phone&gt; — Kick &amp; cancel a user\n` +
-            `➕ /extend &lt;username&gt; &lt;days&gt; — Add days to a sub\n` +
-            `🔍 /search &lt;username/phone&gt; — Look up a user\n` +
-            `❓ /help — Show this message again`
+            `👑 <b>Admin Panel</b>\n\nChoose an action or use a command:`,
+            {
+                inline_keyboard: [
+                    [{ text: '📊 Stats', callback_data: 'admin_stats' }, { text: '📋 Active VIP', callback_data: 'admin_subscribers' }],
+                    [{ text: '🔴 Non-VIP Users', callback_data: 'admin_nonvip' }, { text: '🕐 Expired', callback_data: 'admin_expired' }],
+                    [{ text: '📢 Post to VIP Channel', callback_data: 'admin_post_vip' }],
+                    [{ text: '📣 Post to Public Channel', callback_data: 'admin_post_public' }],
+                    [{ text: '❓ All Commands', callback_data: 'admin_help' }]
+                ]
+            }
         );
         return;
     }
@@ -377,11 +415,12 @@ async function handleCommand(message) {
 
     else if (text === '/stats') {
         const { data: subs } = await supabase.from('prachi_subscriptions').select('*');
-        let st = { total: 0, active: 0, cancelled: 0, expired: 0, revenue: 0 };
+        let st = { total: 0, active: 0, cancelled: 0, expired: 0, revenue: 0, totalRevenue: 0 };
         if (subs) {
             const nowTime = new Date();
             subs.forEach(s => {
                 st.total++;
+                st.totalRevenue += s.amount || 0;
                 if (s.status === 'active' && new Date(s.expires_at) > nowTime) {
                     st.active++;
                     st.revenue += s.amount || 0;
@@ -390,13 +429,32 @@ async function handleCommand(message) {
                 if (s.status === 'expired') st.expired++;
             });
         }
+        const nonVip = st.total - st.active;
+
+        // Also fetch channel counts from Telegram
+        let vipCount = '', publicCount = '';
+        try {
+            if (CHANNEL_ID) {
+                const r = await callTelegramAPI('getChatMemberCount', { chat_id: CHANNEL_ID });
+                if (r.ok) vipCount = ` (${r.result} in channel)`;
+            }
+        } catch (_) {}
+        try {
+            if (PUBLIC_CHANNEL_ID) {
+                const r = await callTelegramAPI('getChatMemberCount', { chat_id: PUBLIC_CHANNEL_ID });
+                if (r.ok) publicCount = `\n📣 Public channel members: ${r.result}`;
+            }
+        } catch (_) {}
+
         await sendMessage(chatId,
-            `📊 <b>Subscription Stats</b>\n\n` +
-            `👥 Total: ${st.total}\n` +
-            `✅ Active: ${st.active}\n` +
+            `📊 <b>Full Stats</b>\n\n` +
+            `💎 <b>VIP (Active):</b> ${st.active}${vipCount}\n` +
+            `🔴 <b>Non-VIP (Expired/Cancelled):</b> ${nonVip}\n` +
             `🕐 Expired: ${st.expired}\n` +
             `❌ Cancelled: ${st.cancelled}\n` +
-            `💰 Active revenue: ₹${st.revenue}`
+            `👥 Total known users: ${st.total}${publicCount}\n\n` +
+            `💰 Active MRR: ₹${st.revenue.toLocaleString()}\n` +
+            `💵 Lifetime revenue: ₹${st.totalRevenue.toLocaleString()}`
         );
     }
 
@@ -567,17 +625,55 @@ async function handleCommand(message) {
         }
     }
 
+    else if (text.startsWith('/post ')) {
+        // /post vip <message>  or  /post public <message>
+        const parts = text.replace('/post ', '').trim();
+        const spaceIdx = parts.indexOf(' ');
+        if (spaceIdx === -1) {
+            await sendMessage(chatId, '❌ Usage:\n<code>/post vip Your message here</code>\n<code>/post public Your message here</code>');
+            return;
+        }
+        const target = parts.slice(0, spaceIdx).toLowerCase();
+        const msgText = parts.slice(spaceIdx + 1).trim();
+        if (!msgText) {
+            await sendMessage(chatId, '❌ Message cannot be empty.');
+            return;
+        }
+        if (target !== 'vip' && target !== 'public') {
+            await sendMessage(chatId, '❌ Target must be <b>vip</b> or <b>public</b>.\nExample: <code>/post vip Hello everyone!</code>');
+            return;
+        }
+        const targetChannelId = target === 'vip' ? CHANNEL_ID : PUBLIC_CHANNEL_ID;
+        if (!targetChannelId) {
+            await sendMessage(chatId, `❌ ${target.toUpperCase()} channel not configured.`);
+            return;
+        }
+        try {
+            const { postToVipChannel, postToPublicChannel } = require('./telegram');
+            target === 'vip' ? await postToVipChannel(msgText) : await postToPublicChannel(msgText);
+            await sendMessage(chatId, `✅ Message posted to ${target.toUpperCase()} channel!`);
+        } catch (e) {
+            await sendMessage(chatId, `❌ Failed to post: ${e.message}`);
+        }
+    }
+
     else if (text === '/help') {
         await sendMessage(chatId,
             `🤖 <b>Admin Commands</b>\n\n` +
-            `/subscribers — List active subscribers\n` +
-            `/expired — List expired/cancelled subs\n` +
-            `/nonvip — List all non-VIP (expired/cancelled) users\n` +
-            `/stats — Subscription statistics\n` +
-            `/broadcast <message> — DM all active subs\n` +
-            `/kick <username/phone/id> — Kick & cancel user\n` +
-            `/extend <username> <days> — Add days to a sub\n` +
-            `/search <username/phone> — Look up a user\n` +
+            `<b>📊 Stats & Users</b>\n` +
+            `/stats — Full stats (VIP, non-VIP, revenue)\n` +
+            `/subscribers — List active VIP subscribers\n` +
+            `/nonvip — List expired &amp; cancelled users\n` +
+            `/expired — List expired/cancelled (short list)\n` +
+            `/search &lt;username/phone&gt; — Look up a user\n\n` +
+            `<b>📢 Messaging</b>\n` +
+            `/post vip &lt;msg&gt; — Post to VIP channel\n` +
+            `/post public &lt;msg&gt; — Post to public channel\n` +
+            `/broadcast &lt;msg&gt; — DM all active subscribers\n\n` +
+            `<b>⚙️ Management</b>\n` +
+            `/extend &lt;username&gt; &lt;days&gt; — Add days to a sub\n` +
+            `/kick &lt;username/phone/id&gt; — Kick &amp; cancel user\n` +
+            `/menu — Show quick-action menu\n` +
             `/help — Show this message`
         );
     }
@@ -639,6 +735,98 @@ async function handleCallbackQuery(callbackQuery) {
                 { inline_keyboard: [[{ text: '💳 Get Access', url: frontendUrl }]] }
             );
         }
+    } else if (data === 'admin_stats' && isAdmin(userId)) {
+        // Trigger the same logic as /stats
+        const { data: subs } = await supabase.from('prachi_subscriptions').select('*');
+        let st = { total: 0, active: 0, cancelled: 0, expired: 0, revenue: 0, totalRevenue: 0 };
+        if (subs) {
+            const nowTime = new Date();
+            subs.forEach(s => {
+                st.total++;
+                st.totalRevenue += s.amount || 0;
+                if (s.status === 'active' && new Date(s.expires_at) > nowTime) { st.active++; st.revenue += s.amount || 0; }
+                if (s.status === 'cancelled') st.cancelled++;
+                if (s.status === 'expired') st.expired++;
+            });
+        }
+        let vipCount = '', publicCount = '';
+        try { if (CHANNEL_ID) { const r = await callTelegramAPI('getChatMemberCount', { chat_id: CHANNEL_ID }); if (r.ok) vipCount = ` (${r.result} in channel)`; } } catch (_) {}
+        try { if (PUBLIC_CHANNEL_ID) { const r = await callTelegramAPI('getChatMemberCount', { chat_id: PUBLIC_CHANNEL_ID }); if (r.ok) publicCount = `\n📣 Public channel members: ${r.result}`; } } catch (_) {}
+        await sendMessage(chatId,
+            `📊 <b>Full Stats</b>\n\n` +
+            `💎 <b>VIP (Active):</b> ${st.active}${vipCount}\n` +
+            `🔴 <b>Non-VIP (Expired/Cancelled):</b> ${st.total - st.active}\n` +
+            `🕐 Expired: ${st.expired}  ❌ Cancelled: ${st.cancelled}\n` +
+            `👥 Total known users: ${st.total}${publicCount}\n\n` +
+            `💰 Active MRR: ₹${st.revenue.toLocaleString()}\n` +
+            `💵 Lifetime revenue: ₹${st.totalRevenue.toLocaleString()}`
+        );
+
+    } else if (data === 'admin_subscribers' && isAdmin(userId)) {
+        const now2 = new Date().toISOString();
+        const { data: subs } = await supabase.from('prachi_subscriptions').select('*').eq('status', 'active').gt('expires_at', now2).order('expires_at', { ascending: true });
+        if (!subs || subs.length === 0) { await sendMessage(chatId, '📋 No active subscribers.'); return; }
+        let msg = `📋 <b>Active VIP Subscribers (${subs.length})</b>\n\n`;
+        for (const s of subs.slice(0, 30)) {
+            const daysLeft = Math.max(0, Math.ceil((new Date(s.expires_at) - Date.now()) / 86400000));
+            msg += `• ${s.telegram_username || s.phone || `ID:${s.telegram_user_id}`} — ${daysLeft}d left (₹${s.amount})\n`;
+        }
+        if (subs.length > 30) msg += `\n...and ${subs.length - 30} more`;
+        await sendMessage(chatId, msg);
+
+    } else if (data === 'admin_nonvip' && isAdmin(userId)) {
+        const now2 = new Date().toISOString();
+        const { data: subs } = await supabase.from('prachi_subscriptions').select('*')
+            .or(`status.eq.expired,status.eq.cancelled,and(status.eq.active,expires_at.lt.${now2})`)
+            .order('expires_at', { ascending: false }).limit(30);
+        if (!subs || subs.length === 0) { await sendMessage(chatId, '✅ No non-VIP users found!'); return; }
+        const chunks = [];
+        for (let i = 0; i < subs.length; i += 10) chunks.push(subs.slice(i, i + 10));
+        for (const chunk of chunks) {
+            let msg = `🔴 <b>Non-VIP Users (${subs.length} total)</b>\n\n`;
+            for (const s of chunk) {
+                const expires = s.expires_at ? new Date(s.expires_at) : null;
+                const daysSince = expires ? Math.floor((Date.now() - expires) / 86400000) : null;
+                const user = s.telegram_username || s.phone || (s.telegram_user_id ? `ID:${s.telegram_user_id}` : 'Unknown');
+                msg += `${s.status === 'cancelled' ? '❌' : '🕐'} <b>${user}</b> — ${s.status}`;
+                if (daysSince !== null) msg += ` · ${daysSince}d ago`;
+                msg += `\n   Paid: ₹${s.amount || 0}\n\n`;
+            }
+            await sendMessage(chatId, msg);
+        }
+
+    } else if (data === 'admin_expired' && isAdmin(userId)) {
+        const { data: expired } = await supabase.from('prachi_subscriptions').select('*').in('status', ['expired', 'cancelled']).order('id', { ascending: false }).limit(20);
+        if (!expired || expired.length === 0) { await sendMessage(chatId, '✅ No expired subscriptions.'); return; }
+        let msg = `🕐 <b>Expired/Cancelled (last 20)</b>\n\n`;
+        for (const s of expired) msg += `• ${s.telegram_username || s.phone || `#${s.id}`} — ${s.status} (₹${s.amount})\n`;
+        await sendMessage(chatId, msg);
+
+    } else if (data === 'admin_post_vip' && isAdmin(userId)) {
+        await sendMessage(chatId, `📢 <b>Post to VIP Channel</b>\n\nSend your message using:\n<code>/post vip Your message here</code>\n\nSupports HTML formatting: <b>bold</b>, <i>italic</i>, <a href='...'>links</a>`);
+
+    } else if (data === 'admin_post_public' && isAdmin(userId)) {
+        await sendMessage(chatId, `📣 <b>Post to Public Channel</b>\n\nSend your message using:\n<code>/post public Your message here</code>\n\nSupports HTML formatting: <b>bold</b>, <i>italic</i>, <a href='...'>links</a>`);
+
+    } else if (data === 'admin_help' && isAdmin(userId)) {
+        await sendMessage(chatId,
+            `🤖 <b>All Admin Commands</b>\n\n` +
+            `<b>📊 Stats & Users</b>\n` +
+            `/stats — Full stats (VIP, non-VIP, revenue)\n` +
+            `/subscribers — Active VIP list\n` +
+            `/nonvip — Expired &amp; cancelled users\n` +
+            `/expired — Short expired list\n` +
+            `/search &lt;user&gt; — Look up a user\n\n` +
+            `<b>📢 Messaging</b>\n` +
+            `/post vip &lt;msg&gt; — Post to VIP channel\n` +
+            `/post public &lt;msg&gt; — Post to public channel\n` +
+            `/broadcast &lt;msg&gt; — DM all active subs\n\n` +
+            `<b>⚙️ Management</b>\n` +
+            `/extend &lt;user&gt; &lt;days&gt; — Add days to sub\n` +
+            `/kick &lt;user&gt; — Kick &amp; cancel user\n` +
+            `/menu — Quick-action menu`
+        );
+
     } else if (data === 'contact_support') {
         await sendMessage(chatId, '📩 Please type your question or request below. An admin will reply to you as soon as possible!');
     } else if (data === 'top_content') {
@@ -673,6 +861,52 @@ async function pollUpdates() {
         } else {
             console.log('[BOT] Bot connected successfully');
         }
+
+        // Auto-fix any stored welcome messages that have the old website URL in their buttons
+        if (cachedBotUsername) {
+            const stored = loadWelcomeStore();
+            if (stored.length > 0) {
+                console.log(`[BOT] Auto-fixing ${stored.length} stored welcome message(s)...`);
+                const frontendUrl = process.env.FRONTEND_URL || 'https://yourwebsite.com';
+                let fixed = 0;
+                for (const entry of stored) {
+                    const botUrl = `https://t.me/${cachedBotUsername}?start=${entry.type || 'vip'}`;
+                    const markup = entry.type === 'public'
+                        ? { inline_keyboard: [
+                            [{ text: '🔔 Start Bot — Get Notified', url: botUrl }],
+                            [{ text: '🔓 Get VIP Access', url: frontendUrl }]
+                          ]}
+                        : { inline_keyboard: [[{ text: '🔔 Start Bot — Activate Perks', url: botUrl }]] };
+                    try {
+                        const r = await callTelegramAPI('editMessageReplyMarkup', {
+                            chat_id: entry.chatId,
+                            message_id: entry.messageId,
+                            reply_markup: markup
+                        });
+                        if (r.ok) fixed++;
+                    } catch (_) {}
+                }
+                console.log(`[BOT] Fixed ${fixed}/${stored.length} welcome message button(s)`);
+            }
+        }
+
+        // Register bot commands so they appear in the Telegram menu
+        await callTelegramAPI('setMyCommands', {
+            commands: [
+                { command: 'menu', description: '👑 Admin quick-action menu' },
+                { command: 'stats', description: '📊 Full stats — VIP, non-VIP, revenue' },
+                { command: 'subscribers', description: '📋 List active VIP subscribers' },
+                { command: 'nonvip', description: '🔴 List expired & cancelled users' },
+                { command: 'post', description: '📢 Post to channel: /post vip <msg> or /post public <msg>' },
+                { command: 'broadcast', description: '💬 DM all active subscribers' },
+                { command: 'search', description: '🔍 Look up a user by username/phone' },
+                { command: 'extend', description: '➕ Add days to a subscription' },
+                { command: 'kick', description: '👢 Kick & cancel a user' },
+                { command: 'expired', description: '🕐 List expired/cancelled subs' },
+                { command: 'help', description: '❓ Show all commands' },
+            ]
+        }).catch(() => {});
+        console.log('[BOT] Commands registered');
     } catch (e) {
         console.error('[BOT] Failed to connect:', e.message);
         return;

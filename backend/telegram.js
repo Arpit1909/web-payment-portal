@@ -85,11 +85,27 @@ async function postToPublicChannel(text, replyMarkup = null) {
     return callTelegramAPI('sendMessage', data);
 }
 
+// Send a blurred (spoiler) photo teaser to the public channel
+async function sendTeaserPhoto(photoUrl, caption, replyMarkup = null) {
+    const publicChannelId = process.env.TELEGRAM_PUBLIC_CHANNEL_ID;
+    if (!publicChannelId) throw new Error('TELEGRAM_PUBLIC_CHANNEL_ID not set');
+    const data = {
+        chat_id: publicChannelId,
+        photo: photoUrl,
+        caption,
+        parse_mode: 'HTML',
+        has_spoiler: true   // native Telegram blur effect
+    };
+    if (replyMarkup) data.reply_markup = replyMarkup;
+    return callTelegramAPI('sendPhoto', data);
+}
+
 module.exports = {
     kickUser,
     unbanUser,
     createInviteLink,
     sendMessage,
     postToPublicChannel,
+    sendTeaserPhoto,
     callTelegramAPI
 };

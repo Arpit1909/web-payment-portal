@@ -497,11 +497,46 @@ async function handleCommand(message) {
         await sendMessage(chatId, msg);
     }
 
+    else if (text === '/nonvip') {
+        const now = new Date().toISOString();
+        // Expired active subs + cancelled subs — these are known users not currently in VIP
+        const { data: subs } = await supabase.from('prachi_subscriptions')
+            .select('*')
+            .or(`status.eq.expired,status.eq.cancelled,and(status.eq.active,expires_at.lt.${now})`)
+            .order('expires_at', { ascending: false })
+            .limit(30);
+
+        if (!subs || subs.length === 0) {
+            await sendMessage(chatId, '✅ No non-VIP users found — everyone is active!');
+            return;
+        }
+
+        // Split into chunks of 10 to avoid message length limits
+        const chunks = [];
+        for (let i = 0; i < subs.length; i += 10) chunks.push(subs.slice(i, i + 10));
+
+        for (const chunk of chunks) {
+            let msg = `👥 <b>Non-VIP Users (${subs.length} total)</b>\n\n`;
+            for (const s of chunk) {
+                const expires = s.expires_at ? new Date(s.expires_at) : null;
+                const daysSince = expires ? Math.floor((Date.now() - expires) / (1000 * 60 * 60 * 24)) : null;
+                const user = s.telegram_username || s.phone || (s.telegram_user_id ? `ID:${s.telegram_user_id}` : 'Unknown');
+                const statusEmoji = s.status === 'cancelled' ? '❌' : '🕐';
+                msg += `${statusEmoji} <b>${user}</b>\n`;
+                msg += `   Status: ${s.status}`;
+                if (expires) msg += ` · Expired ${daysSince}d ago`;
+                msg += `\n   Paid: ₹${s.amount || 0}\n\n`;
+            }
+            await sendMessage(chatId, msg);
+        }
+    }
+
     else if (text === '/help') {
         await sendMessage(chatId,
             `🤖 <b>Admin Commands</b>\n\n` +
             `/subscribers — List active subscribers\n` +
             `/expired — List expired/cancelled subs\n` +
+            `/nonvip — List all non-VIP (expired/cancelled) users\n` +
             `/stats — Subscription statistics\n` +
             `/broadcast <message> — DM all active subs\n` +
             `/kick <username/phone/id> — Kick & cancel user\n` +

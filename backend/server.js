@@ -10,7 +10,7 @@ const path = require('path');
 const cron = require('node-cron');
 const sharp = require('sharp');
 const telegram = require('./telegram');
-const instantpay = require('./instantpay');
+const imbpay = require('./imbpay');
 const { pollUpdates } = require('./bot');
 
 dotenv.config();
@@ -68,7 +68,7 @@ app.get('/api/public/data', async (req, res) => {
     }
 });
 
-// 2. InstantPay — Create a payment request
+// 2. IMB — Create a payment order
 const BACKEND_URL = process.env.BACKEND_URL || `http://localhost:${PORT}`;
 
 app.post('/api/payment/create', async (req, res) => {
@@ -83,21 +83,22 @@ app.post('/api/payment/create', async (req, res) => {
         if (err) return res.status(500).json({ error: err.message });
 
         const amount = offer ? offer.discounted_price : 199;
+        const orderId = `PRACHI_${Date.now()}_${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
 
-        const paymentRequest = await instantpay.createPaymentRequest({
+        const order = await imbpay.createOrder({
+            orderId,
             amount,
-            purpose: 'Monthly Exclusive Content Subscription',
-            buyerName: buyerName || '',
             phone,
+            name: buyerName || '',
             email: email || '',
-            redirectUrl: `${FRONTEND_URL}/payment/callback`,
-            webhookUrl: `${BACKEND_URL}/api/payment/webhook`
+            webhookUrl: `${BACKEND_URL}/api/payment/webhook`,
+            redirectUrl: `${FRONTEND_URL}/payment/callback?oid=${orderId}`
         });
 
         await supabase.from('prachi_subscriptions').insert({
             telegram_username: telegramUsername || '',
             phone,
-            transaction_id: paymentRequest.id,
+            transaction_id: orderId,
             amount,
             plan: 'monthly',
             status: 'pending'
@@ -105,87 +106,83 @@ app.post('/api/payment/create', async (req, res) => {
 
         res.json({
             success: true,
-            payment_url: paymentRequest.longurl,
-            payment_request_id: paymentRequest.id
+            payment_url: order.paymentUrl,
+            order_id: orderId
         });
     } catch (e) {
-        console.error('InstantPay create error:', e.message);
+        console.error('[IMB] Create order error:', e.message);
         res.status(500).json({ error: 'Payment gateway error. Please try again.' });
     }
 });
 
-// 2b. InstantPay — Webhook (server-to-server callback after payment)
+// 2b. IMB — Webhook (server-to-server callback after payment)
 app.post('/api/payment/webhook', (req, res) => {
-    const { payment_request_id, payment_id, status } = req.body;
+    console.log('[IMB Webhook] Body:', JSON.stringify(req.body));
+    res.status(200).send('OK'); // Always respond 200 immediately
 
-    console.log(`[Webhook] payment_request_id=${payment_request_id} payment_id=${payment_id} status=${status}`);
+    const body = req.body;
+    // IMB sends order_id and status in various field names — handle all
+    const orderId = body.order_id || body.orderId || body.merchant_order_id || '';
+    const txnId   = body.transaction_id || body.txn_id || body.utr || body.utr_no || '';
+    const rawStatus = (body.status || body.payment_status || body.txn_status || '').toUpperCase();
+    const isPaid = ['SUCCESS', 'PAID', 'COMPLETED', 'CREDIT'].includes(rawStatus);
 
-    if (status === 'Credit') {
-        const now = new Date().toISOString();
-        const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    if (!orderId || !isPaid) return;
 
-        (async () => {
-            const { data: updatedSub, error: updateErr } = await supabase
-                .from('prachi_subscriptions')
-                .update({ status: 'active', expires_at: expiresAt, transaction_id: payment_id })
-                .eq('transaction_id', payment_request_id)
-                .eq('status', 'pending')
-                .select()
-                .maybeSingle();
+    const now = new Date().toISOString();
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
 
-            if (updateErr) console.error('[Webhook] DB update error:', updateErr.message);
-            else if (updatedSub) {
-                console.log(`[Webhook] Subscription activated for request ${payment_request_id}`);
-                await supabase.from('prachi_payment_logs').insert({
-                    subscription_id: updatedSub.id,
-                    transaction_id: payment_id,
-                    amount: updatedSub.amount,
-                    status: 'success',
-                    paid_at: now
-                });
-                // Notify admins of new subscriber
-                if (process.env.TELEGRAM_BOT_TOKEN) {
-                    const adminIds = (process.env.TELEGRAM_ADMIN_ID || '').split(',').map(s => s.trim()).filter(Boolean);
-                    const expiryFormatted = new Date(expiresAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-                    for (const adminId of adminIds) {
-                        try {
-                            await telegram.sendMessage(adminId,
-                                `💰 <b>New Subscriber!</b>\n\n` +
-                                `📱 Phone: ${updatedSub.phone || 'N/A'}\n` +
-                                `👤 Telegram: ${updatedSub.telegram_username || 'N/A'}\n` +
-                                `💳 Amount: ₹${updatedSub.amount}\n` +
-                                `📅 Expires: ${expiryFormatted}`
-                            );
-                        } catch (_) {}
-                    }
-                }
+    (async () => {
+        const { data: updatedSub, error: updateErr } = await supabase
+            .from('prachi_subscriptions')
+            .update({ status: 'active', expires_at: expiresAt, started_at: now })
+            .eq('transaction_id', orderId)
+            .eq('status', 'pending')
+            .select()
+            .maybeSingle();
+
+        if (updateErr) { console.error('[Webhook] DB error:', updateErr.message); return; }
+        if (!updatedSub) { console.log('[Webhook] No pending sub found for order:', orderId); return; }
+
+        console.log(`[Webhook] Activated subscription #${updatedSub.id} for order ${orderId}`);
+
+        await supabase.from('prachi_payment_logs').insert({
+            subscription_id: updatedSub.id,
+            transaction_id: txnId || orderId,
+            amount: updatedSub.amount,
+            status: 'success',
+            paid_at: now
+        });
+
+        // Notify admins on Telegram
+        if (process.env.TELEGRAM_BOT_TOKEN) {
+            const adminIds = (process.env.TELEGRAM_ADMIN_ID || '').split(',').map(s => s.trim()).filter(Boolean);
+            const expiryFormatted = new Date(expiresAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+            for (const adminId of adminIds) {
+                try {
+                    await telegram.sendMessage(adminId,
+                        `💰 <b>New Subscriber!</b>\n\n` +
+                        `📱 Phone: ${updatedSub.phone || 'N/A'}\n` +
+                        `👤 Telegram: ${updatedSub.telegram_username || 'N/A'}\n` +
+                        `💳 Amount: ₹${updatedSub.amount}\n` +
+                        `🆔 Order: ${orderId}\n` +
+                        `📅 Expires: ${expiryFormatted}`
+                    );
+                } catch (_) {}
             }
-        })();
-    }
-
-    res.status(200).send('OK');
+        }
+    })();
 });
 
-// 2c. InstantPay — Verify payment from frontend after redirect
-app.get('/api/payment/verify/:paymentRequestId/:paymentId', async (req, res) => {
-    const { paymentRequestId, paymentId } = req.params;
+// 2c. IMB — Check order status (called by frontend callback page + polling)
+app.get('/api/payment/status/:orderId', async (req, res) => {
+    const { orderId } = req.params;
 
     try {
-        const result = await instantpay.verifyPayment(paymentRequestId, paymentId);
-
-        if (!result.verified) {
-            return res.json({ success: false, reason: result.reason });
-        }
-
-        const now = new Date().toISOString();
-        const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-
-        let inviteUrl = 'https://t.me/placeholder';
-        const { data: settings } = await supabase.from('prachi_settings').select('telegram_channel_url').order('id', { ascending: false }).limit(1).maybeSingle();
-        if (settings) inviteUrl = settings.telegram_channel_url;
-        
         const getInviteUrl = async () => {
-            let url = inviteUrl;
+            let url = 'https://t.me/placeholder';
+            const { data: settings } = await supabase.from('prachi_settings').select('telegram_channel_url').order('id', { ascending: false }).limit(1).maybeSingle();
+            if (settings) url = settings.telegram_channel_url;
             if (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHANNEL_ID) {
                 try {
                     const linkRes = await telegram.createInviteLink(86400);
@@ -195,70 +192,47 @@ app.get('/api/payment/verify/:paymentRequestId/:paymentId', async (req, res) => 
             return url;
         };
 
-        const { data: existingSub } = await supabase.from('prachi_subscriptions').select('*').eq('transaction_id', paymentId).maybeSingle();
-        
-        if (existingSub && existingSub.status === 'active') {
-            return res.json({ success: true, telegram_url: await getInviteUrl(), expires_at: existingSub.expires_at });
+        // First check our DB — webhook may have already activated it
+        const { data: sub } = await supabase.from('prachi_subscriptions').select('*').eq('transaction_id', orderId).maybeSingle();
+
+        if (sub && sub.status === 'active') {
+            return res.json({ success: true, telegram_url: await getInviteUrl(), expires_at: sub.expires_at });
         }
 
-        const { data: updatedSub, error: updateErr } = await supabase
+        // DB not updated yet — ask IMB directly
+        const imb = await imbpay.checkOrderStatus(orderId);
+
+        if (!imb.paid) {
+            return res.json({ success: false, reason: `Payment status: ${imb.status}` });
+        }
+
+        // IMB says paid but DB not updated — activate now
+        const now = new Date().toISOString();
+        const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+
+        const { data: updatedSub } = await supabase
             .from('prachi_subscriptions')
-            .update({ status: 'active', expires_at: expiresAt, transaction_id: paymentId })
-            .eq('transaction_id', paymentRequestId)
+            .update({ status: 'active', expires_at: expiresAt, started_at: now })
+            .eq('transaction_id', orderId)
             .eq('status', 'pending')
             .select()
             .maybeSingle();
 
-        if (updateErr) return res.status(500).json({ error: updateErr.message });
-
-        let currentSubId;
-        let amountPaid = result.amount;
-
-        if (!updatedSub) {
-            const { data: newSub } = await supabase.from('prachi_subscriptions').insert({
-                phone: result.buyerPhone || '',
-                transaction_id: paymentId,
-                amount: result.amount,
-                plan: 'monthly',
-                status: 'active',
-                started_at: now,
-                expires_at: expiresAt
-            }).select().maybeSingle();
-            if (newSub) currentSubId = newSub.id;
-        } else {
-            currentSubId = updatedSub.id;
-            amountPaid = updatedSub.amount;
-        }
-
-        if (currentSubId) {
+        if (updatedSub) {
             await supabase.from('prachi_payment_logs').insert({
-                subscription_id: currentSubId,
-                transaction_id: paymentId,
-                amount: amountPaid,
+                subscription_id: updatedSub.id,
+                transaction_id: imb.transactionId || orderId,
+                amount: updatedSub.amount,
                 status: 'success',
                 paid_at: now
             });
             // Notify admins of new subscriber
-            if (process.env.TELEGRAM_BOT_TOKEN) {
-                const adminIds = (process.env.TELEGRAM_ADMIN_ID || '').split(',').map(s => s.trim()).filter(Boolean);
-                const expiryFormatted = new Date(expiresAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-                for (const adminId of adminIds) {
-                    try {
-                        await telegram.sendMessage(adminId,
-                            `💰 <b>New Subscriber!</b>\n\n` +
-                            `📱 Phone: ${result.buyerPhone || 'N/A'}\n` +
-                            `💳 Amount: ₹${amountPaid}\n` +
-                            `📅 Expires: ${expiryFormatted}`
-                        );
-                    } catch (_) {}
-                }
-            }
         }
 
         res.json({ success: true, telegram_url: await getInviteUrl(), expires_at: expiresAt });
     } catch (e) {
-        console.error('Payment verify error:', e.message);
-        res.status(500).json({ success: false, error: 'Verification failed' });
+        console.error('[IMB] Status check error:', e.message);
+        res.status(500).json({ success: false, error: 'Status check failed' });
     }
 });
 

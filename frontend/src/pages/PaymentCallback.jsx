@@ -11,37 +11,50 @@ export default function PaymentCallback() {
 
     useEffect(() => {
         const params = new URLSearchParams(window.location.search);
-        const paymentRequestId = params.get('payment_request_id');
-        const paymentId = params.get('payment_id');
 
-        if (!paymentRequestId || !paymentId) {
-            setStatus('error');
-            setErrorMsg('Missing payment details. Please try again.');
-            return;
-        }
-
-        // Fetch bot username alongside payment verification
+        // Fetch bot username
         fetch(apiUrl('/api/public/data'))
             .then(r => r.json())
             .then(d => { if (d.bot_username) setBotUsername(d.bot_username); })
             .catch(() => {});
 
-        fetch(apiUrl(`/api/payment/verify/${paymentRequestId}/${paymentId}`))
-            .then(res => res.json())
-            .then(result => {
-                if (result.success && result.telegram_url) {
-                    setTelegramUrl(result.telegram_url);
-                    setExpiresAt(result.expires_at);
-                    setStatus('success');
-                } else {
-                    setStatus('error');
-                    setErrorMsg(result.reason || 'Payment verification failed. If you paid, please contact support.');
-                }
-            })
-            .catch(() => {
-                setStatus('error');
-                setErrorMsg('Network error. Please refresh the page to retry.');
-            });
+        // Get order ID from URL (?oid=xxx)
+        const orderId = params.get('oid');
+        if (!orderId) {
+            setStatus('error');
+            setErrorMsg('Missing order details. Please contact support if you completed payment.');
+            return;
+        }
+
+        // Poll IMB status — retry every 4 seconds up to 20 times (80 seconds)
+        let attempts = 0;
+        const maxAttempts = 20;
+
+        const poll = () => {
+            fetch(apiUrl(`/api/payment/status/${orderId}`))
+                .then(res => res.json())
+                .then(result => {
+                    if (result.success && result.telegram_url) {
+                        setTelegramUrl(result.telegram_url);
+                        setExpiresAt(result.expires_at);
+                        setStatus('success');
+                    } else {
+                        attempts++;
+                        if (attempts < maxAttempts) {
+                            setTimeout(poll, 4000);
+                        } else {
+                            setStatus('error');
+                            setErrorMsg('Payment not confirmed yet. If you paid, please wait a moment and refresh — or contact support.');
+                        }
+                    }
+                })
+                .catch(() => {
+                    attempts++;
+                    if (attempts < maxAttempts) setTimeout(poll, 4000);
+                    else { setStatus('error'); setErrorMsg('Network error. Please refresh the page.'); }
+                });
+        };
+        poll();
     }, []);
 
     return (

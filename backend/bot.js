@@ -75,14 +75,14 @@ async function sendVipQrFlow(chatId, userId) {
     }
 
     const qrCaption = pay.qrCaption && String(pay.qrCaption).trim()
-        ? String(pay.qrCaption).trim()
+        ? String(pay.qrCaption).trim() + `\n\n💰 <b>Amount:</b> Rs ${VIP_SUBSCRIPTION_AMOUNT}/-`
         : `✨ <b>Welcome to Premium VIP Access</b> ✨\n\n` +
           `┏━━━━━━━━━━━━━━━┓\n` +
           `💎 <b>Plan:</b> VIP Membership\n` +
-          `💰 <b>Amount:</b> ₹${VIP_SUBSCRIPTION_AMOUNT}/-\n` +
+          `💰 <b>Amount:</b> Rs ${VIP_SUBSCRIPTION_AMOUNT}/-\n` +
           `┗━━━━━━━━━━━━━━━┛\n\n` +
           `📌 <b>How to activate:</b>\n` +
-          `1️⃣ Scan this QR & complete payment\n` +
+          `1️⃣ Scan this QR & complete payment of Rs ${VIP_SUBSCRIPTION_AMOUNT}/-\n` +
           `2️⃣ Tap <b>Send Payment Screenshot</b>\n` +
           `3️⃣ Share screenshot + UTR for quick verification\n\n` +
           `⚡ <i>Once verified, your VIP access is shared here ASAP.</i>`;
@@ -102,8 +102,8 @@ async function sendVipQrFlow(chatId, userId) {
 async function sendVipPaymentOption(chatId) {
     await sendMessage(chatId,
         `💳 <b>VIP Payment</b>\n\n` +
-        `Tap the button below to view the QR and payment instructions.`,
-        { inline_keyboard: [[{ text: '💳 Pay via QR', callback_data: 'vip_qr' }]] }
+        `Tap the button below to view the QR and complete your payment of <b>Rs 399/-</b>.`,
+        { inline_keyboard: [[{ text: '💳 Pay via QR - Rs 399/-', callback_data: 'vip_qr' }]] }
     );
 }
 

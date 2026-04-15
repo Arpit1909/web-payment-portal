@@ -107,7 +107,10 @@ app.post('/api/payment/create', async (req, res) => {
         res.json({
             success: true,
             payment_url: order.paymentUrl,
-            order_id: orderId
+            qr_code: order.qrCode || '',
+            upi_string: order.upiString || '',
+            order_id: orderId,
+            amount
         });
     } catch (e) {
         console.error('[IMB] Create order error:', e.message);

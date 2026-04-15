@@ -13,10 +13,12 @@ export default function Home() {
     const [verifying, setVerifying] = useState(false);
     const [payPhone, setPayPhone] = useState('');
     const [payTgUsername, setPayTgUsername] = useState('');
-    const [paySuccess, setPaySuccess] = useState(false);
+    const [payStep, setPayStep] = useState('form'); // 'form' | 'qr' | 'done'
+    const [qrData, setQrData] = useState(null);
     const [telegramLink, setTelegramLink] = useState('');
     const [payTimer, setPayTimer] = useState(300);
     const payTimerRef = useRef(null);
+    const pollRef = useRef(null);
     const [timeLeft, setTimeLeft] = useState({ hours: 0, minutes: 0, seconds: 0 });
     const [btnTextIndex, setBtnTextIndex] = useState(0);
     const slideRef = useRef(null);
@@ -114,8 +116,10 @@ export default function Home() {
 
     const closeModal = () => {
         setShowModal(false);
-        setPaySuccess(false);
+        setPayStep('form');
+        setQrData(null);
         setTelegramLink('');
+        if (pollRef.current) clearInterval(pollRef.current);
     };
 
     const handlePayNow = () => {
@@ -124,28 +128,49 @@ export default function Home() {
             return;
         }
         setVerifying(true);
-            fetch(apiUrl('/api/payment/create'), {
+        fetch(apiUrl('/api/payment/create'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                phone: payPhone,
-                telegramUsername: payTgUsername
-            })
+            body: JSON.stringify({ phone: payPhone, telegramUsername: payTgUsername })
         })
-            .then(res => res.json())
-            .then(result => {
-                setVerifying(false);
-                if (result.success && result.payment_url) {
-                    window.location.href = result.payment_url;
-                } else {
-                    alert(result.error || 'Failed to create payment. Please try again.');
-                }
-            })
-            .catch(() => {
-                setVerifying(false);
-                alert('Network error. Please try again.');
-            });
+        .then(res => res.json())
+        .then(result => {
+            setVerifying(false);
+            if (result.success) {
+                setQrData({
+                    qrCode: result.qr_code || '',
+                    upiString: result.upi_string || '',
+                    orderId: result.order_id,
+                    amount: result.amount
+                });
+                setPayStep('qr');
+            } else {
+                alert(result.error || 'Failed to create payment. Please try again.');
+            }
+        })
+        .catch(() => {
+            setVerifying(false);
+            alert('Network error. Please try again.');
+        });
     };
+
+    // Poll for payment confirmation every 3s when QR is showing
+    useEffect(() => {
+        if (payStep !== 'qr' || !qrData?.orderId) return;
+        pollRef.current = setInterval(() => {
+            fetch(apiUrl(`/api/payment/status/${qrData.orderId}`))
+                .then(r => r.json())
+                .then(result => {
+                    if (result.success && result.telegram_url) {
+                        clearInterval(pollRef.current);
+                        setTelegramLink(result.telegram_url);
+                        setPayStep('done');
+                    }
+                })
+                .catch(() => {});
+        }, 3000);
+        return () => { if (pollRef.current) clearInterval(pollRef.current); };
+    }, [payStep, qrData]);
 
     if (loading) return (
         <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0a0a0f' }}>
@@ -341,7 +366,7 @@ export default function Home() {
                             <X size={20} strokeWidth={2.5} />
                         </button>
 
-                        {paySuccess ? (
+                        {payStep === 'done' ? (
                             <div style={{ textAlign: 'center', padding: '1rem 0' }}>
                                 <div style={{
                                     width: '80px', height: '80px', borderRadius: '50%',
@@ -410,6 +435,56 @@ export default function Home() {
                                     Access valid for 30 days from today
                                 </p>
                             </div>
+                        ) : payStep === 'qr' ? (
+                            /* ── QR PAYMENT SCREEN ── */
+                            <div style={{ textAlign: 'center', padding: '0.5rem 0' }}>
+                                <p style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--gold)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.4rem' }}>Scan to Pay</p>
+                                <div style={{
+                                    background: '#fff', borderRadius: '16px', padding: '12px',
+                                    display: 'inline-block', marginBottom: '1rem',
+                                    boxShadow: '0 0 30px rgba(229,165,75,0.2)'
+                                }}>
+                                    {(qrData?.qrCode || qrData?.upiString) ? (
+                                        <img
+                                            src={qrData.qrCode || `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(qrData.upiString)}`}
+                                            alt="UPI QR Code"
+                                            width={220} height={220}
+                                            style={{ display: 'block', borderRadius: '8px' }}
+                                        />
+                                    ) : (
+                                        <div style={{ width: 220, height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#666', fontSize: '0.85rem' }}>
+                                            Loading QR...
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div style={{ display: 'flex', justifyContent: 'center', gap: '1.5rem', marginBottom: '1rem', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                                    <span>Order: <b style={{ color: 'var(--text-secondary)' }}>{qrData?.orderId?.split('_').pop()}</b></span>
+                                    <span>Amount: <b style={{ color: 'var(--gold)' }}>₹{qrData?.amount}</b></span>
+                                </div>
+
+                                <div style={{
+                                    display: 'flex', alignItems: 'center', gap: '0.5rem', justifyContent: 'center',
+                                    background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)',
+                                    borderRadius: '9999px', padding: '0.5rem 1.2rem', marginBottom: '1.25rem',
+                                    fontSize: '0.82rem', color: 'var(--green)'
+                                }}>
+                                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--green)', display: 'inline-block', animation: 'pulse 1.5s ease-in-out infinite' }} />
+                                    Waiting for payment...
+                                </div>
+
+                                <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '1rem', lineHeight: 1.6 }}>
+                                    Open any UPI app (GPay, PhonePe, Paytm) → Scan QR → Pay<br />
+                                    <b style={{ color: 'var(--text-secondary)' }}>The Telegram join link will appear here automatically after payment.</b>
+                                </p>
+
+                                {/* Payment logos */}
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.6rem', flexWrap: 'wrap', opacity: 0.6 }}>
+                                    {['GPay', 'PhonePe', 'Paytm', 'UPI', 'BHIM'].map(app => (
+                                        <span key={app} style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', background: 'rgba(255,255,255,0.06)', borderRadius: '6px', padding: '0.25rem 0.6rem', border: '1px solid rgba(255,255,255,0.08)' }}>{app}</span>
+                                    ))}
+                                </div>
+                            </div>
                         ) : (
                         <div style={{ textAlign: 'center' }}>
                             <div style={{
@@ -470,7 +545,7 @@ export default function Home() {
                             <div style={{ textAlign: 'left', background: 'rgba(0,0,0,0.2)', borderRadius: '12px', padding: '1rem 1.25rem', marginBottom: '1.25rem', border: '1px solid rgba(255,255,255,0.05)' }}>
                                 {[
                                     'Enter your phone number below',
-                                    'Click "Pay Now" to open secure payment page',
+                                    'Click "Make Payment" to get a QR code',
                                     'Complete payment via UPI, Card, or Net Banking',
                                     'After payment, you\'ll get the Telegram join link'
                                 ].map((step, i) => (
@@ -549,7 +624,7 @@ export default function Home() {
 
                             <p className="security-note">
                                 <ShieldCheck size={13} color="#22D47A" />
-                                Secured by InstantPay • 100% safe payment
+                                Secured by IMB Pay • 100% safe payment
                             </p>
                         </div>
                         )}

@@ -235,9 +235,9 @@ async function handleSupportTicket(message) {
                         message_id: fwdMsgId,
                         reply_markup: markup
                     });
-                    await sendMessage(chatId, `✅ Fixed! Button now links to:\n${botUrl}`);
+                    await sendMessage(message.chat.id, `✅ Fixed! Button now links to:\n${botUrl}`);
                 } catch (e) {
-                    await sendMessage(chatId, `❌ Could not edit: ${e.message}\n\nMake sure you forwarded the exact welcome message from the channel.`);
+                    await sendMessage(message.chat.id, `❌ Could not edit: ${e.message}\n\nMake sure you forwarded the exact welcome message from the channel.`);
                 }
                 return;
             }

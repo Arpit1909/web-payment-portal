@@ -4,6 +4,7 @@ require('dotenv').config();
 
 const CLIENT_ID = process.env.IMB_CLIENT_ID;
 const CLIENT_SECRET = process.env.IMB_CLIENT_SECRET;
+const MERCHANT_CODE = process.env.IMB_MERCHANT_CODE;
 const BASE_URL = 'https://secure.imbpayment.in/api/v1';
 
 function apiRequest(method, endpoint, data = null) {
@@ -53,6 +54,7 @@ function apiRequest(method, endpoint, data = null) {
 
 async function createOrder({ orderId, amount, phone, name, email, webhookUrl, redirectUrl }) {
     const data = {
+        merchant_code: MERCHANT_CODE,
         order_id: orderId,
         amount: String(amount),
         customer_phone: phone,

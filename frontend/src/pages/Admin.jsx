@@ -516,6 +516,8 @@ export default function Admin() {
                     body: JSON.stringify({
                         title: activeCaption || 'Uploaded Media',
                         caption: activeCaption,
+                        vipCaption: (mediaCaptions.vip || '').trim(),
+                        publicCaption: (mediaCaptions.public || '').trim(),
                         url: uploadData.url,
                         type: isVideo ? 'video' : 'image',
                         is_locked: 1,

@@ -73,7 +73,7 @@ app.get('/api/public/data', async (req, res) => {
 const BACKEND_URL = process.env.BACKEND_URL || `http://localhost:${PORT}`;
 const FFMPEG_PATH = process.env.FFMPEG_PATH || 'ffmpeg';
 function getVipEntryUrl(fallbackUrl = FRONTEND_URL) {
-    const envBotUsername = (process.env.TELEGRAM_BOT_USERNAME || '').replace(/^@/, '').trim();
+    const envBotUsername = (process.env.TELEGRAM_BOT_USERNAME || 'manager_keshavs_bot').replace(/^@/, '').trim();
     return envBotUsername ? `https://t.me/${envBotUsername}?start=vip` : fallbackUrl;
 }
 
@@ -379,12 +379,14 @@ app.get('/api/admin/previews', verifyToken, async (req, res) => {
 });
 
 app.post('/api/admin/previews', verifyToken, async (req, res) => {
-    const { title, caption, url, type, is_locked, order_index, postDestination } = req.body;
+    const { title, caption, vipCaption, publicCaption, url, type, is_locked, order_index, postDestination } = req.body;
     // postDestination: 'vip' | 'public' | 'none'
     const safeCaption = (caption || title || '').toString().trim();
+    const safeVipCaption = (vipCaption || safeCaption || title || '').toString().trim();
+    const safePublicCaption = (publicCaption || safeCaption || title || '').toString().trim();
 
     const { data, error } = await supabase.from('prachi_previews').insert({
-        title: safeCaption || 'Uploaded Media', url, type: type || 'image', is_locked: is_locked !== undefined ? is_locked : 1, order_index: order_index || 0
+        title: safeVipCaption || safeCaption || 'Uploaded Media', url, type: type || 'image', is_locked: is_locked !== undefined ? is_locked : 1, order_index: order_index || 0
     }).select().maybeSingle();
 
     if (error) return res.status(500).json({ error: error.message });
@@ -398,8 +400,10 @@ app.post('/api/admin/previews', verifyToken, async (req, res) => {
         const isImage = (type || 'image') === 'image';
         const mediaUrl = url ? `${backendUrl}${url}` : '';
         const contentType = isImage ? '📸 New Photo' : '🎬 New Video';
-        const fallbackCaption = `${contentType} just dropped! 🔥\n\n<i>Enjoy the exclusive content!</i>`;
-        const vipCaption = safeCaption || fallbackCaption;
+        const vipFallbackCaption = `${contentType} just dropped! 🔥\n\n<i>Enjoy the exclusive content!</i>`;
+        const vipPostCaption = safeVipCaption || vipFallbackCaption;
+        const publicFallbackCaption = `${contentType} just posted! 🎉`;
+        const publicPostCaption = safePublicCaption || publicFallbackCaption;
 
         (async () => {
             try {
@@ -407,20 +411,20 @@ app.post('/api/admin/previews', verifyToken, async (req, res) => {
                     // --- Post actual content to VIP channel ---
                     if (isImage && mediaUrl) {
                         try {
-                            await telegram.sendPhotoToVipChannel(mediaUrl, vipCaption);
+                            await telegram.sendPhotoToVipChannel(mediaUrl, vipPostCaption);
                         } catch (e) {
                             console.error('[POST-VIP] Photo failed, sending text:', e.message);
-                            await telegram.postToVipChannel(vipCaption).catch(() => {});
+                            await telegram.postToVipChannel(vipPostCaption).catch(() => {});
                         }
                     } else if (!isImage && mediaUrl) {
                         try {
-                            await telegram.sendVideoToVipChannel(mediaUrl, vipCaption);
+                            await telegram.sendVideoToVipChannel(mediaUrl, vipPostCaption);
                         } catch (e) {
                             console.error('[POST-VIP] Video failed, sending text:', e.message);
-                            await telegram.postToVipChannel(vipCaption).catch(() => {});
+                            await telegram.postToVipChannel(vipPostCaption).catch(() => {});
                         }
                     } else {
-                        await telegram.postToVipChannel(vipCaption).catch(() => {});
+                        await telegram.postToVipChannel(vipPostCaption).catch(() => {});
                     }
 
                     // --- DM all active subscribers: new content alert ---
@@ -439,7 +443,7 @@ app.post('/api/admin/previews', verifyToken, async (req, res) => {
                     // --- Also post blurred teaser to public channel ---
                     if (process.env.TELEGRAM_PUBLIC_CHANNEL_ID) {
                         const teaserCaption =
-                            `${safeCaption || `${contentType} just dropped in the VIP Channel!`}\n\n` +
+                            `${safePublicCaption || `${contentType} just dropped in the VIP Channel!`}\n\n` +
                             `🔒 <b>Exclusive to VIP members only.</b>\n\n` +
                             `👇 Tap below to get access!`;
                         const keyboard = { inline_keyboard: [[{ text: '🔓 Join VIP Now', url: vipEntryUrl }]] };
@@ -482,25 +486,24 @@ app.post('/api/admin/previews', verifyToken, async (req, res) => {
 
                 } else if (dest === 'public') {
                     // --- Post actual content to public channel (no blur) ---
-                    const publicCaption = safeCaption || `${contentType} just posted! 🎉`;
                     const keyboard = { inline_keyboard: [[{ text: '🔓 Join VIP Now', url: vipEntryUrl }]] };
 
                     if (isImage && mediaUrl) {
                         try {
-                            await telegram.sendTeaserPhoto(mediaUrl, publicCaption, keyboard);
+                            await telegram.sendTeaserPhoto(mediaUrl, publicPostCaption, keyboard);
                         } catch (e) {
                             console.error('[POST-PUBLIC] Photo failed, sending text:', e.message);
-                            telegram.postToPublicChannel(publicCaption, keyboard).catch(() => {});
+                            telegram.postToPublicChannel(publicPostCaption, keyboard).catch(() => {});
                         }
                     } else if (!isImage && mediaUrl) {
                         try {
-                            await telegram.sendVideoToPublicChannel(mediaUrl, publicCaption, keyboard);
+                            await telegram.sendVideoToPublicChannel(mediaUrl, publicPostCaption, keyboard);
                         } catch (e) {
                             console.error('[POST-PUBLIC] Video failed, sending text:', e.message);
-                            telegram.postToPublicChannel(publicCaption, keyboard).catch(() => {});
+                            telegram.postToPublicChannel(publicPostCaption, keyboard).catch(() => {});
                         }
                     } else {
-                        telegram.postToPublicChannel(publicCaption, keyboard).catch(() => {});
+                        telegram.postToPublicChannel(publicPostCaption, keyboard).catch(() => {});
                     }
                 }
             } catch (e) {

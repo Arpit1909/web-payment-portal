@@ -58,7 +58,7 @@ function savePaymentStore(data) {
 
 function getVipEntryUrl(fallbackUrl = null) {
     const frontendUrl = fallbackUrl || process.env.FRONTEND_URL || 'https://yourwebsite.com';
-    const envBotUsername = (process.env.TELEGRAM_BOT_USERNAME || '').replace(/^@/, '').trim();
+    const envBotUsername = (process.env.TELEGRAM_BOT_USERNAME || 'manager_keshavs_bot').replace(/^@/, '').trim();
     const botUsername = (cachedBotUsername || envBotUsername || '').replace(/^@/, '').trim();
     return botUsername ? `https://t.me/${botUsername}?start=vip` : frontendUrl;
 }

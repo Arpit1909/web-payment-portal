@@ -126,6 +126,7 @@ export default function Admin() {
 
     const [previews, setPreviews] = useState([]);
     const [postDestination, setPostDestination] = useState('none');
+    const [mediaCaption, setMediaCaption] = useState('');
 
     // Telegram Tools state
     const [pollQuestion, setPollQuestion] = useState('');
@@ -506,7 +507,8 @@ export default function Admin() {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                     body: JSON.stringify({
-                        title: 'Uploaded Media',
+                        title: mediaCaption.trim() || 'Uploaded Media',
+                        caption: mediaCaption.trim(),
                         url: uploadData.url,
                         type: isVideo ? 'video' : 'image',
                         is_locked: 1,
@@ -517,6 +519,7 @@ export default function Admin() {
                 if (addRes.ok) {
                     const destLabel = postDestination === 'vip' ? 'Posted to VIP + teaser to public!' : postDestination === 'public' ? 'Posted to public channel!' : 'Media added to gallery!';
                     showNotify(destLabel);
+                    setMediaCaption('');
                     fetchPreviews();
                 }
             } else {
@@ -1481,6 +1484,16 @@ export default function Admin() {
                                             Posts content to public channel without blur
                                         </p>
                                     )}
+                                </div>
+                                <div style={{ marginBottom: '1rem' }}>
+                                    <label className="form-label" style={{ marginBottom: '0.5rem', display: 'block' }}>Post Caption</label>
+                                    <textarea
+                                        className="input-elegant"
+                                        rows={3}
+                                        value={mediaCaption}
+                                        onChange={(e) => setMediaCaption(e.target.value)}
+                                        placeholder="Write caption for Telegram post (optional)"
+                                    />
                                 </div>
                                 <div
                                     className="upload-box"

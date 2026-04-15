@@ -375,11 +375,12 @@ app.get('/api/admin/previews', verifyToken, async (req, res) => {
 });
 
 app.post('/api/admin/previews', verifyToken, async (req, res) => {
-    const { title, url, type, is_locked, order_index, postDestination } = req.body;
+    const { title, caption, url, type, is_locked, order_index, postDestination } = req.body;
     // postDestination: 'vip' | 'public' | 'none'
+    const safeCaption = (caption || title || '').toString().trim();
 
     const { data, error } = await supabase.from('prachi_previews').insert({
-        title: title || '', url, type: type || 'image', is_locked: is_locked !== undefined ? is_locked : 1, order_index: order_index || 0
+        title: safeCaption || 'Uploaded Media', url, type: type || 'image', is_locked: is_locked !== undefined ? is_locked : 1, order_index: order_index || 0
     }).select().maybeSingle();
 
     if (error) return res.status(500).json({ error: error.message });
@@ -392,12 +393,13 @@ app.post('/api/admin/previews', verifyToken, async (req, res) => {
         const isImage = (type || 'image') === 'image';
         const mediaUrl = url ? `${backendUrl}${url}` : '';
         const contentType = isImage ? '📸 New Photo' : '🎬 New Video';
+        const fallbackCaption = `${contentType} just dropped! 🔥\n\n<i>Enjoy the exclusive content!</i>`;
+        const vipCaption = safeCaption || fallbackCaption;
 
         (async () => {
             try {
                 if (dest === 'vip') {
                     // --- Post actual content to VIP channel ---
-                    const vipCaption = `${contentType} just dropped! 🔥\n\n<i>Enjoy the exclusive content!</i>`;
                     if (isImage && mediaUrl) {
                         try {
                             await telegram.sendPhotoToVipChannel(mediaUrl, vipCaption);
@@ -432,7 +434,7 @@ app.post('/api/admin/previews', verifyToken, async (req, res) => {
                     // --- Also post blurred teaser to public channel ---
                     if (process.env.TELEGRAM_PUBLIC_CHANNEL_ID) {
                         const teaserCaption =
-                            `${contentType} just dropped in the VIP Channel!\n\n` +
+                            `${safeCaption || `${contentType} just dropped in the VIP Channel!`}\n\n` +
                             `🔒 <b>Exclusive to VIP members only.</b>\n\n` +
                             `👇 Tap below to get access!`;
                         const keyboard = { inline_keyboard: [[{ text: '🔓 Join VIP Now', url: frontendUrl }]] };
@@ -475,7 +477,7 @@ app.post('/api/admin/previews', verifyToken, async (req, res) => {
 
                 } else if (dest === 'public') {
                     // --- Post actual content to public channel (no blur) ---
-                    const publicCaption = `${contentType} just posted! 🎉`;
+                    const publicCaption = safeCaption || `${contentType} just posted! 🎉`;
                     const keyboard = { inline_keyboard: [[{ text: '🔓 Join VIP Now', url: frontendUrl }]] };
 
                     if (isImage && mediaUrl) {

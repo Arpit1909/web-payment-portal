@@ -127,6 +127,7 @@ export default function Admin() {
     const [previews, setPreviews] = useState([]);
     const [postDestination, setPostDestination] = useState('none');
     const [mediaCaption, setMediaCaption] = useState('');
+    const [captionPreviewMode, setCaptionPreviewMode] = useState('auto');
 
     // Telegram Tools state
     const [pollQuestion, setPollQuestion] = useState('');
@@ -1494,6 +1495,63 @@ export default function Admin() {
                                         onChange={(e) => setMediaCaption(e.target.value)}
                                         placeholder="Write caption for Telegram post (optional)"
                                     />
+                                </div>
+                                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.7rem' }}>
+                                    {[
+                                        { value: 'auto', label: 'Auto' },
+                                        { value: 'vip', label: 'VIP Preview' },
+                                        { value: 'public', label: 'Public Preview' }
+                                    ].map(opt => (
+                                        <button
+                                            key={opt.value}
+                                            type="button"
+                                            onClick={() => setCaptionPreviewMode(opt.value)}
+                                            style={{
+                                                padding: '0.35rem 0.75rem',
+                                                borderRadius: '999px',
+                                                border: captionPreviewMode === opt.value ? '1px solid var(--gold)' : '1px solid var(--border)',
+                                                background: captionPreviewMode === opt.value ? 'rgba(229,165,75,0.16)' : 'var(--surface)',
+                                                color: captionPreviewMode === opt.value ? 'var(--gold)' : 'var(--text-secondary)',
+                                                fontSize: '0.76rem',
+                                                fontWeight: 700,
+                                                cursor: 'pointer'
+                                            }}
+                                        >
+                                            {opt.label}
+                                        </button>
+                                    ))}
+                                </div>
+                                <div
+                                    style={{
+                                        marginBottom: '1rem',
+                                        border: '1px solid var(--border)',
+                                        borderRadius: '12px',
+                                        background: 'var(--surface)',
+                                        overflow: 'hidden'
+                                    }}
+                                >
+                                    <div
+                                        style={{
+                                            padding: '0.55rem 0.85rem',
+                                            borderBottom: '1px solid var(--border)',
+                                            fontSize: '0.74rem',
+                                            letterSpacing: '0.06em',
+                                            textTransform: 'uppercase',
+                                            fontWeight: 700,
+                                            color: 'var(--text-secondary)'
+                                        }}
+                                    >
+                                        Caption Preview
+                                    </div>
+                                    <div style={{ padding: '0.8rem 0.85rem', color: 'var(--text-primary)', fontSize: '0.9rem', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+                                        {mediaCaption.trim()
+                                            ? mediaCaption.trim()
+                                            : (captionPreviewMode === 'vip' || (captionPreviewMode === 'auto' && postDestination === 'vip'))
+                                                ? '📸/🎬 New media just dropped! 🔥\n\nEnjoy the exclusive content!'
+                                                : (captionPreviewMode === 'public' || (captionPreviewMode === 'auto' && postDestination === 'public'))
+                                                    ? '📸/🎬 New media just posted! 🎉'
+                                                    : 'Upload only mode selected (no Telegram post).'}
+                                    </div>
                                 </div>
                                 <div
                                     className="upload-box"

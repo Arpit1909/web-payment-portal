@@ -32,13 +32,15 @@ function apiRequest(method, endpoint, data = null) {
             options.headers['Content-Length'] = Buffer.byteLength(postData);
         }
 
+        if (data) console.log(`[IMB] ${method} ${endpoint} sending:`, JSON.stringify(data));
+
         const req = https.request(options, (res) => {
             let body = '';
             res.on('data', chunk => body += chunk);
             res.on('end', () => {
                 try {
                     const parsed = JSON.parse(body);
-                    console.log(`[IMB] ${method} ${endpoint} →`, JSON.stringify(parsed).substring(0, 300));
+                    console.log(`[IMB] ${method} ${endpoint} →`, JSON.stringify(parsed).substring(0, 500));
                     resolve(parsed);
                 } catch (e) {
                     reject(new Error(`IMB invalid JSON: ${body.substring(0, 300)}`));

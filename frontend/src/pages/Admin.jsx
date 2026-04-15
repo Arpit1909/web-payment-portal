@@ -126,8 +126,14 @@ export default function Admin() {
 
     const [previews, setPreviews] = useState([]);
     const [postDestination, setPostDestination] = useState('none');
-    const [mediaCaption, setMediaCaption] = useState('');
+    const [mediaCaptions, setMediaCaptions] = useState({ vip: '', public: '', none: '' });
     const [captionPreviewMode, setCaptionPreviewMode] = useState('auto');
+    const selectedCaptionKey = postDestination === 'vip' || postDestination === 'public' ? postDestination : 'none';
+    const captionEditorKey = captionPreviewMode === 'auto' ? selectedCaptionKey : captionPreviewMode;
+    const activeCaption = (mediaCaptions[selectedCaptionKey] || '').trim();
+    const editorCaption = mediaCaptions[captionEditorKey] || '';
+    const previewCaptionKey = captionPreviewMode === 'auto' ? selectedCaptionKey : captionPreviewMode;
+    const previewTypedCaption = (mediaCaptions[previewCaptionKey] || '').trim();
 
     // Telegram Tools state
     const [pollQuestion, setPollQuestion] = useState('');
@@ -508,8 +514,8 @@ export default function Admin() {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                     body: JSON.stringify({
-                        title: mediaCaption.trim() || 'Uploaded Media',
-                        caption: mediaCaption.trim(),
+                        title: activeCaption || 'Uploaded Media',
+                        caption: activeCaption,
                         url: uploadData.url,
                         type: isVideo ? 'video' : 'image',
                         is_locked: 1,
@@ -520,7 +526,7 @@ export default function Admin() {
                 if (addRes.ok) {
                     const destLabel = postDestination === 'vip' ? 'Posted to VIP + teaser to public!' : postDestination === 'public' ? 'Posted to public channel!' : 'Media added to gallery!';
                     showNotify(destLabel);
-                    setMediaCaption('');
+                    setMediaCaptions(prev => ({ ...prev, [selectedCaptionKey]: '' }));
                     fetchPreviews();
                 }
             } else {
@@ -1491,9 +1497,9 @@ export default function Admin() {
                                     <textarea
                                         className="input-elegant"
                                         rows={3}
-                                        value={mediaCaption}
-                                        onChange={(e) => setMediaCaption(e.target.value)}
-                                        placeholder="Write caption for Telegram post (optional)"
+                                        value={editorCaption}
+                                        onChange={(e) => setMediaCaptions(prev => ({ ...prev, [captionEditorKey]: e.target.value }))}
+                                        placeholder={`Write ${captionEditorKey.toUpperCase()} caption (optional)`}
                                     />
                                 </div>
                                 <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.7rem' }}>
@@ -1544,11 +1550,11 @@ export default function Admin() {
                                         Caption Preview
                                     </div>
                                     <div style={{ padding: '0.8rem 0.85rem', color: 'var(--text-primary)', fontSize: '0.9rem', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
-                                        {mediaCaption.trim()
-                                            ? mediaCaption.trim()
-                                            : (captionPreviewMode === 'vip' || (captionPreviewMode === 'auto' && postDestination === 'vip'))
+                                        {previewTypedCaption
+                                            ? previewTypedCaption
+                                            : (previewCaptionKey === 'vip')
                                                 ? '📸/🎬 New media just dropped! 🔥\n\nEnjoy the exclusive content!'
-                                                : (captionPreviewMode === 'public' || (captionPreviewMode === 'auto' && postDestination === 'public'))
+                                                : (previewCaptionKey === 'public')
                                                     ? '📸/🎬 New media just posted! 🎉'
                                                     : 'Upload only mode selected (no Telegram post).'}
                                     </div>

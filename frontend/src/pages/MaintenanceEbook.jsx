@@ -253,7 +253,7 @@ function toTime(ts) {
 
 export default function MaintenanceEbook() {
   const [cart, setCart] = useState({});
-  const [paymentMethod, setPaymentMethod] = useState('razorpay');
+  const [paymentMethod, setPaymentMethod] = useState('payment');
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('All');
   const [sortBy, setSortBy] = useState('popularity');
@@ -310,7 +310,7 @@ export default function MaintenanceEbook() {
 
   const handlePay = () => {
     if (!items.length) return;
-    alert('Temporary maintenance template: connect this button to your Razorpay checkout flow.');
+    alert('Temporary maintenance template: connect this button to your payment checkout flow.');
   };
 
   return (
@@ -643,16 +643,16 @@ export default function MaintenanceEbook() {
 
             <div style={{ marginTop: '.9rem' }}>
               <div style={{ fontSize: '.86rem', color: '#9db0c7', marginBottom: '.4rem' }}>Payment option</div>
-              <label style={payOption(paymentMethod === 'razorpay')}>
+              <label style={payOption(paymentMethod === 'payment')}>
                 <input
                   type="radio"
                   name="payment"
-                  value="razorpay"
-                  checked={paymentMethod === 'razorpay'}
-                  onChange={() => setPaymentMethod('razorpay')}
+                  value="payment"
+                  checked={paymentMethod === 'payment'}
+                  onChange={() => setPaymentMethod('payment')}
                 />
                 <span style={{ display: 'flex', alignItems: 'center', gap: '.45rem' }}>
-                  <CreditCard size={15} /> Razorpay
+                  <CreditCard size={15} /> Make Payment
                 </span>
               </label>
             </div>
@@ -672,7 +672,7 @@ export default function MaintenanceEbook() {
                 color: items.length ? '#fff' : '#9ea9b9'
               }}
             >
-              Proceed to Razorpay
+              Make Payment
             </button>
           </aside>
         </div>

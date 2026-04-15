@@ -4,6 +4,9 @@ import Home from './pages/Home';
 import Admin from './pages/Admin';
 import PaymentCallback from './pages/PaymentCallback';
 import MaintenanceEbook from './pages/MaintenanceEbook';
+import PrivacyPolicy from './pages/PrivacyPolicy';
+import RefundPolicy from './pages/RefundPolicy';
+import CancellationPolicy from './pages/CancellationPolicy';
 import { apiUrl } from './apiConfig';
 
 function AppRoutes({ maintenanceMode, settings }) {
@@ -14,6 +17,9 @@ function AppRoutes({ maintenanceMode, settings }) {
     return (
       <Routes>
         <Route path="/admin" element={<Admin />} />
+        <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+        <Route path="/refund-policy" element={<RefundPolicy />} />
+        <Route path="/cancellation-policy" element={<CancellationPolicy />} />
         <Route path="*" element={<MaintenanceEbook settings={settings} />} />
       </Routes>
     );
@@ -24,6 +30,9 @@ function AppRoutes({ maintenanceMode, settings }) {
       <Route path="/" element={<Home />} />
       <Route path="/admin" element={<Admin />} />
       <Route path="/payment/callback" element={<PaymentCallback />} />
+      <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+      <Route path="/refund-policy" element={<RefundPolicy />} />
+      <Route path="/cancellation-policy" element={<CancellationPolicy />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

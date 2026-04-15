@@ -93,7 +93,7 @@ export default function Admin() {
 
     const [offerData, setOfferData] = useState({
         original_price: 899,
-        discounted_price: 199,
+        discounted_price: 399,
         timer_end_date: ''
     });
 
@@ -243,7 +243,7 @@ export default function Admin() {
                 }
                 if (data.offer) setOfferData({
                     original_price: data.offer.original_price || 899,
-                    discounted_price: data.offer.discounted_price || 199,
+                    discounted_price: data.offer.discounted_price || 399,
                     timer_end_date: timerDate
                 });
             }).catch(console.error);
@@ -1394,7 +1394,7 @@ export default function Admin() {
                                         type="number"
                                         value={offerData.discounted_price}
                                         onChange={e => setOfferData({ ...offerData, discounted_price: e.target.value })}
-                                        placeholder="199"
+                                        placeholder="399"
                                     />
                                     <p className="input-hint">This is the actual amount users pay</p>
                                 </div>

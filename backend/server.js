@@ -111,7 +111,7 @@ app.post('/api/payment/create', async (req, res) => {
         const { data: offer, error: err } = await supabase.from('prachi_offers').select('*').eq('is_active', 1).order('id', { ascending: false }).limit(1).maybeSingle();
         if (err) return res.status(500).json({ error: err.message });
 
-        const amount = offer ? offer.discounted_price : 199;
+        const amount = offer ? offer.discounted_price : 399;
         const orderId = `PRACHI_${Date.now()}_${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
 
         const order = await imbpay.createOrder({

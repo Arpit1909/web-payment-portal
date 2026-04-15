@@ -339,7 +339,7 @@ export default function Home() {
                         <div className="sp-cta-title">{ctaButtonText}</div>
                         <div className="sp-cta-price">
                             <s className="sp-cta-old">₹{offer.original_price || '899'}</s>
-                            <span className="sp-cta-new">₹{offer.discounted_price || '199'}</span>
+                            <span className="sp-cta-new">₹{offer.discounted_price || '399'}</span>
                             {savePct > 0 && <span className="sp-cta-off">{savePct}% OFF</span>}
                         </div>
                     </div>
@@ -510,7 +510,7 @@ export default function Home() {
                                     fontSize: '1.25rem', fontWeight: 900,
                                     padding: '0.5rem 1.5rem', borderRadius: '9999px'
                                 }}>
-                                    ₹{offer.discounted_price || '199'} / month
+                                    ₹{offer.discounted_price || '399'} / month
                                 </span>
                                 {savePct > 0 && (
                                     <div style={{ marginTop: '0.4rem', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
@@ -617,7 +617,7 @@ export default function Home() {
                                 ) : (
                                     <>
                                         <ShieldCheck size={18} />
-                                        Pay Now — ₹{offer.discounted_price || '199'}
+                                        Pay Now — ₹{offer.discounted_price || '399'}
                                     </>
                                 )}
                             </button>

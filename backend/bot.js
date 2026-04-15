@@ -25,6 +25,7 @@ let cachedBotUsername = process.env.TELEGRAM_BOT_USERNAME || '';
 const welcomeMessageIds = new Map();
 const pendingPaymentProofUsers = new Map(); // userId -> timestamp
 const awaitingQrUploadAdmins = new Set(); // admin userIds
+const VIP_SUBSCRIPTION_AMOUNT = 399;
 
 // Persistent store for welcome messages so we can fix their button URLs on restart
 const WELCOME_STORE_PATH = path.join(__dirname, 'welcome_msgs.json');
@@ -76,6 +77,7 @@ async function sendVipQrFlow(chatId, userId) {
     const qrCaption = pay.qrCaption && String(pay.qrCaption).trim()
         ? String(pay.qrCaption).trim()
         : `💎 <b>VIP Access Payment</b>\n\n` +
+          `💰 VIP Access - <b>${VIP_SUBSCRIPTION_AMOUNT}/-</b>\n\n` +
           `1) Scan this QR and complete payment.\n` +
           `2) Send your payment screenshot in this chat.\n` +
           `3) Our team will verify and share VIP access.\n\n` +
@@ -88,7 +90,7 @@ async function sendVipQrFlow(chatId, userId) {
         parse_mode: 'HTML'
     });
     pendingPaymentProofUsers.set(String(userId), Date.now());
-    await sendMessage(chatId, `📤 Now send your <b>payment screenshot</b> here.\n\nAlso include your UTR/reference in text if visible.`);
+    await sendMessage(chatId, `💰 VIP Access - <b>${VIP_SUBSCRIPTION_AMOUNT}/-</b>\n\n📤 Now send your <b>payment screenshot</b> here.\n\nAlso include your UTR/reference in text if visible.`);
 }
 
 function addToWelcomeStore(chatId, messageId, type) {

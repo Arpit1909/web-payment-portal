@@ -1,5 +1,16 @@
-import { useMemo, useState } from 'react';
-import { BookOpen, ShoppingCart, Plus, Minus, Trash2, CreditCard, Search, Sparkles } from 'lucide-react';
+﻿import { useMemo, useState } from 'react';
+import {
+  BookOpen,
+  ShoppingCart,
+  Plus,
+  Minus,
+  Trash2,
+  CreditCard,
+  Search,
+  Sparkles,
+  X,
+  Star
+} from 'lucide-react';
 
 const EBOOKS = [
   {
@@ -8,8 +19,15 @@ const EBOOKS = [
     author: 'James Clear',
     price: 399,
     category: 'Self Growth',
+    popularity: 98,
+    releasedAt: '2018-10-16',
+    bestSeller: true,
+    isNew: false,
     cover: 'https://images.unsplash.com/photo-1512820790803-83ca734da794?auto=format&fit=crop&w=500&q=80',
-    blurb: 'Build better habits with practical, science-backed methods.'
+    blurb: 'Build better habits with practical, science-backed methods.',
+    pages: 320,
+    language: 'English',
+    format: 'PDF + EPUB'
   },
   {
     id: 'ebk-2',
@@ -17,8 +35,15 @@ const EBOOKS = [
     author: 'Morgan Housel',
     price: 349,
     category: 'Finance',
+    popularity: 96,
+    releasedAt: '2020-09-08',
+    bestSeller: true,
+    isNew: false,
     cover: 'https://images.unsplash.com/photo-1481627834876-b7833e8f5570?auto=format&fit=crop&w=500&q=80',
-    blurb: 'Timeless lessons on wealth, greed, and financial behavior.'
+    blurb: 'Timeless lessons on wealth, greed, and financial behavior.',
+    pages: 256,
+    language: 'English',
+    format: 'PDF + EPUB'
   },
   {
     id: 'ebk-3',
@@ -26,8 +51,15 @@ const EBOOKS = [
     author: 'Robert T. Kiyosaki',
     price: 299,
     category: 'Finance',
+    popularity: 92,
+    releasedAt: '1997-04-01',
+    bestSeller: true,
+    isNew: false,
     cover: 'https://images.unsplash.com/photo-1495446815901-a7297e633e8d?auto=format&fit=crop&w=500&q=80',
-    blurb: 'A bestselling mindset shift for money, assets, and investing.'
+    blurb: 'A bestselling mindset shift for money, assets, and investing.',
+    pages: 336,
+    language: 'English',
+    format: 'PDF + EPUB'
   },
   {
     id: 'ebk-4',
@@ -35,8 +67,15 @@ const EBOOKS = [
     author: 'Stephen R. Covey',
     price: 449,
     category: 'Leadership',
+    popularity: 88,
+    releasedAt: '1989-08-15',
+    bestSeller: false,
+    isNew: false,
     cover: 'https://images.unsplash.com/photo-1507842217343-583bb7270b66?auto=format&fit=crop&w=500&q=80',
-    blurb: 'Powerful principles for personal and professional effectiveness.'
+    blurb: 'Powerful principles for personal and professional effectiveness.',
+    pages: 432,
+    language: 'English',
+    format: 'PDF + EPUB'
   },
   {
     id: 'ebk-5',
@@ -44,8 +83,15 @@ const EBOOKS = [
     author: 'Hector Garcia & Francesc Miralles',
     price: 299,
     category: 'Self Growth',
+    popularity: 84,
+    releasedAt: '2016-04-29',
+    bestSeller: false,
+    isNew: false,
     cover: 'https://images.unsplash.com/photo-1455885666463-9ad48653f7ce?auto=format&fit=crop&w=500&q=80',
-    blurb: 'Japanese wisdom for a meaningful, balanced, and joyful life.'
+    blurb: 'Japanese wisdom for a meaningful, balanced, and joyful life.',
+    pages: 224,
+    language: 'English',
+    format: 'PDF + EPUB'
   },
   {
     id: 'ebk-6',
@@ -53,8 +99,15 @@ const EBOOKS = [
     author: 'Napoleon Hill',
     price: 279,
     category: 'Self Growth',
+    popularity: 85,
+    releasedAt: '1937-01-01',
+    bestSeller: false,
+    isNew: false,
     cover: 'https://images.unsplash.com/photo-1516979187457-637abb4f9353?auto=format&fit=crop&w=500&q=80',
-    blurb: 'Classic success philosophy used by entrepreneurs worldwide.'
+    blurb: 'Classic success philosophy used by entrepreneurs worldwide.',
+    pages: 320,
+    language: 'English',
+    format: 'PDF + EPUB'
   },
   {
     id: 'ebk-7',
@@ -62,8 +115,15 @@ const EBOOKS = [
     author: 'Cal Newport',
     price: 359,
     category: 'Productivity',
+    popularity: 90,
+    releasedAt: '2016-01-05',
+    bestSeller: false,
+    isNew: false,
     cover: 'https://images.unsplash.com/photo-1497633762265-9d179a990aa6?auto=format&fit=crop&w=500&q=80',
-    blurb: 'Master focus and produce high-value work in less time.'
+    blurb: 'Master focus and produce high-value work in less time.',
+    pages: 304,
+    language: 'English',
+    format: 'PDF + EPUB'
   },
   {
     id: 'ebk-8',
@@ -71,8 +131,15 @@ const EBOOKS = [
     author: 'Eric Jorgenson',
     price: 399,
     category: 'Business',
+    popularity: 87,
+    releasedAt: '2020-12-01',
+    bestSeller: false,
+    isNew: true,
     cover: 'https://images.unsplash.com/photo-1509266272358-7701da638078?auto=format&fit=crop&w=500&q=80',
-    blurb: 'Wisdom on wealth, happiness, leverage, and long-term thinking.'
+    blurb: 'Wisdom on wealth, happiness, leverage, and long-term thinking.',
+    pages: 252,
+    language: 'English',
+    format: 'PDF + EPUB'
   },
   {
     id: 'ebk-9',
@@ -80,8 +147,15 @@ const EBOOKS = [
     author: 'Mark Manson',
     price: 379,
     category: 'Self Growth',
+    popularity: 89,
+    releasedAt: '2016-09-13',
+    bestSeller: true,
+    isNew: false,
     cover: 'https://images.unsplash.com/photo-1515098506762-79e1384e9d8e?auto=format&fit=crop&w=500&q=80',
-    blurb: 'A brutally honest approach to living a better life.'
+    blurb: 'A brutally honest approach to living a better life.',
+    pages: 224,
+    language: 'English',
+    format: 'PDF + EPUB'
   },
   {
     id: 'ebk-10',
@@ -89,8 +163,15 @@ const EBOOKS = [
     author: 'Yuval Noah Harari',
     price: 499,
     category: 'History',
+    popularity: 91,
+    releasedAt: '2011-01-01',
+    bestSeller: true,
+    isNew: false,
     cover: 'https://images.unsplash.com/photo-1496104679561-38b3b4f4d5f4?auto=format&fit=crop&w=500&q=80',
-    blurb: 'A brief history of humankind from evolution to modern society.'
+    blurb: 'A brief history of humankind from evolution to modern society.',
+    pages: 512,
+    language: 'English',
+    format: 'PDF + EPUB'
   },
   {
     id: 'ebk-11',
@@ -98,8 +179,15 @@ const EBOOKS = [
     author: 'Simon Sinek',
     price: 339,
     category: 'Leadership',
+    popularity: 83,
+    releasedAt: '2009-10-06',
+    bestSeller: false,
+    isNew: false,
     cover: 'https://images.unsplash.com/photo-1521587760476-6c12a4b040da?auto=format&fit=crop&w=500&q=80',
-    blurb: 'How great leaders inspire action and build loyal communities.'
+    blurb: 'How great leaders inspire action and build loyal communities.',
+    pages: 256,
+    language: 'English',
+    format: 'PDF + EPUB'
   },
   {
     id: 'ebk-12',
@@ -107,13 +195,60 @@ const EBOOKS = [
     author: 'Peter Thiel',
     price: 329,
     category: 'Business',
+    popularity: 86,
+    releasedAt: '2014-09-16',
+    bestSeller: false,
+    isNew: false,
     cover: 'https://images.unsplash.com/photo-1544947950-fa07a98d237f?auto=format&fit=crop&w=500&q=80',
-    blurb: 'Notes on startups and building truly innovative businesses.'
+    blurb: 'Notes on startups and building truly innovative businesses.',
+    pages: 224,
+    language: 'English',
+    format: 'PDF + EPUB'
+  },
+  {
+    id: 'ebk-13',
+    title: 'The Lean Startup',
+    author: 'Eric Ries',
+    price: 369,
+    category: 'Business',
+    popularity: 82,
+    releasedAt: '2011-09-13',
+    bestSeller: false,
+    isNew: true,
+    cover: 'https://images.unsplash.com/photo-1519681393784-d120267933ba?auto=format&fit=crop&w=500&q=80',
+    blurb: 'How today’s entrepreneurs use continuous innovation to create businesses.',
+    pages: 336,
+    language: 'English',
+    format: 'PDF + EPUB'
+  },
+  {
+    id: 'ebk-14',
+    title: 'Can’t Hurt Me',
+    author: 'David Goggins',
+    price: 429,
+    category: 'Self Growth',
+    popularity: 94,
+    releasedAt: '2018-12-04',
+    bestSeller: true,
+    isNew: true,
+    cover: 'https://images.unsplash.com/photo-1476275466078-4007374efbbe?auto=format&fit=crop&w=500&q=80',
+    blurb: 'Master your mind and defy the odds with mental toughness.',
+    pages: 364,
+    language: 'English',
+    format: 'PDF + EPUB'
   }
 ];
 
 function formatInr(value) {
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(value);
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: 0
+  }).format(value);
+}
+
+function toTime(ts) {
+  return new Date(ts).getTime();
 }
 
 export default function MaintenanceEbook() {
@@ -121,12 +256,14 @@ export default function MaintenanceEbook() {
   const [paymentMethod, setPaymentMethod] = useState('razorpay');
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('All');
+  const [sortBy, setSortBy] = useState('popularity');
+  const [selectedBook, setSelectedBook] = useState(null);
 
-  const tabs = useMemo(() => ['All', ...Array.from(new Set(EBOOKS.map(b => b.category)))], []);
+  const tabs = useMemo(() => ['All', ...Array.from(new Set(EBOOKS.map((b) => b.category)))], []);
 
   const visibleBooks = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
-    return EBOOKS.filter(book => {
+    let filtered = EBOOKS.filter((book) => {
       const inCategory = activeTab === 'All' || book.category === activeTab;
       const inSearch =
         !query ||
@@ -135,33 +272,37 @@ export default function MaintenanceEbook() {
         book.category.toLowerCase().includes(query);
       return inCategory && inSearch;
     });
-  }, [activeTab, searchQuery]);
 
-  const items = useMemo(() => {
-    return EBOOKS
-      .map(book => ({ ...book, qty: cart[book.id] || 0 }))
-      .filter(book => book.qty > 0);
-  }, [cart]);
+    filtered = [...filtered].sort((a, b) => {
+      if (sortBy === 'priceLowHigh') return a.price - b.price;
+      if (sortBy === 'newest') return toTime(b.releasedAt) - toTime(a.releasedAt);
+      return b.popularity - a.popularity;
+    });
 
-  const subtotal = useMemo(
-    () => items.reduce((sum, item) => sum + item.price * item.qty, 0),
-    [items]
+    return filtered;
+  }, [activeTab, searchQuery, sortBy]);
+
+  const items = useMemo(
+    () => EBOOKS.map((book) => ({ ...book, qty: cart[book.id] || 0 })).filter((book) => book.qty > 0),
+    [cart]
   );
 
+  const subtotal = useMemo(() => items.reduce((sum, item) => sum + item.price * item.qty, 0), [items]);
   const platformFee = subtotal > 0 ? 9 : 0;
   const total = subtotal + platformFee;
 
-  const add = (id) => setCart(prev => ({ ...prev, [id]: (prev[id] || 0) + 1 }));
+  const add = (id) => setCart((prev) => ({ ...prev, [id]: (prev[id] || 0) + 1 }));
   const remove = (id) =>
-    setCart(prev => {
+    setCart((prev) => {
       const next = { ...prev };
       if (!next[id]) return prev;
       next[id] -= 1;
       if (next[id] <= 0) delete next[id];
       return next;
     });
+
   const clearItem = (id) =>
-    setCart(prev => {
+    setCart((prev) => {
       const next = { ...prev };
       delete next[id];
       return next;
@@ -174,19 +315,21 @@ export default function MaintenanceEbook() {
 
   return (
     <div style={{ minHeight: '100vh', background: '#080b12', color: '#f5f7fa', padding: '1.2rem' }}>
-      <div style={{ maxWidth: 1600, margin: '0 auto' }}>
-        <div style={{
-          border: '1px solid rgba(255,255,255,0.12)',
-          borderRadius: 18,
-          padding: '1rem 1.2rem',
-          marginBottom: '1rem',
-          background: 'linear-gradient(135deg, rgba(38,90,255,0.22), rgba(26,188,156,0.18))',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '1rem',
-          flexWrap: 'wrap'
-        }}>
+      <div style={{ maxWidth: 1650, margin: '0 auto' }}>
+        <div
+          style={{
+            border: '1px solid rgba(255,255,255,0.12)',
+            borderRadius: 18,
+            padding: '1rem 1.2rem',
+            marginBottom: '1rem',
+            background: 'linear-gradient(135deg, rgba(38,90,255,0.22), rgba(26,188,156,0.18))',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '1rem',
+            flexWrap: 'wrap'
+          }}
+        >
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '.55rem', fontWeight: 800 }}>
               <BookOpen size={20} />
@@ -196,49 +339,66 @@ export default function MaintenanceEbook() {
               Discover bestselling books across business, finance, productivity, and personal growth.
             </p>
           </div>
-          <div style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '.45rem',
-            border: '1px solid rgba(255,255,255,0.22)',
-            borderRadius: 999,
-            padding: '.4rem .7rem',
-            background: 'rgba(255,255,255,0.08)',
-            color: '#d8ecff',
-            fontSize: '.83rem',
-            fontWeight: 700
-          }}>
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '.45rem',
+              border: '1px solid rgba(255,255,255,0.22)',
+              borderRadius: 999,
+              padding: '.4rem .7rem',
+              background: 'rgba(255,255,255,0.08)',
+              color: '#d8ecff',
+              fontSize: '.83rem',
+              fontWeight: 700
+            }}
+          >
             <Sparkles size={14} />
             Trusted by 25,000+ readers
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,3fr) minmax(280px,1fr)', gap: '1rem' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,3fr) minmax(300px,1fr)', gap: '1rem' }}>
           <div>
-            <div style={{
-              border: '1px solid rgba(255,255,255,0.1)',
-              borderRadius: 14,
-              background: 'rgba(255,255,255,0.03)',
-              padding: '.8rem',
-              marginBottom: '.9rem'
-            }}>
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'minmax(240px, 1.2fr) 2fr',
-                gap: '.7rem',
-                alignItems: 'center'
-              }}>
-                <div style={{
-                  position: 'relative',
-                  border: '1px solid rgba(255,255,255,0.15)',
-                  borderRadius: 10,
-                  overflow: 'hidden',
-                  background: 'rgba(0,0,0,0.25)'
-                }}>
-                  <Search size={15} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#91a7c7' }} />
+            <div
+              style={{
+                border: '1px solid rgba(255,255,255,0.1)',
+                borderRadius: 14,
+                background: 'rgba(255,255,255,0.03)',
+                padding: '.8rem',
+                marginBottom: '.9rem'
+              }}
+            >
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'minmax(240px, 1.2fr) 2fr auto',
+                  gap: '.7rem',
+                  alignItems: 'center'
+                }}
+              >
+                <div
+                  style={{
+                    position: 'relative',
+                    border: '1px solid rgba(255,255,255,0.15)',
+                    borderRadius: 10,
+                    overflow: 'hidden',
+                    background: 'rgba(0,0,0,0.25)'
+                  }}
+                >
+                  <Search
+                    size={15}
+                    style={{
+                      position: 'absolute',
+                      left: 10,
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      color: '#91a7c7'
+                    }}
+                  />
                   <input
                     value={searchQuery}
-                    onChange={e => setSearchQuery(e.target.value)}
+                    onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Search by title, author, or category..."
                     style={{
                       width: '100%',
@@ -251,8 +411,9 @@ export default function MaintenanceEbook() {
                     }}
                   />
                 </div>
+
                 <div style={{ display: 'flex', gap: '.45rem', overflowX: 'auto', paddingBottom: '.2rem' }}>
-                  {tabs.map(tab => {
+                  {tabs.map((tab) => {
                     const active = tab === activeTab;
                     return (
                       <button
@@ -275,82 +436,144 @@ export default function MaintenanceEbook() {
                     );
                   })}
                 </div>
+
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value)}
+                  style={{
+                    border: '1px solid rgba(255,255,255,0.2)',
+                    background: 'rgba(255,255,255,0.04)',
+                    color: '#d9e8ff',
+                    borderRadius: 10,
+                    padding: '.52rem .62rem',
+                    fontSize: '.82rem',
+                    fontWeight: 700,
+                    outline: 'none',
+                    minWidth: 165
+                  }}
+                >
+                  <option style={{ background: '#101824' }} value="popularity">
+                    Sort: Popularity
+                  </option>
+                  <option style={{ background: '#101824' }} value="priceLowHigh">
+                    Sort: Price Low-High
+                  </option>
+                  <option style={{ background: '#101824' }} value="newest">
+                    Sort: Newest
+                  </option>
+                </select>
               </div>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(220px,1fr))', gap: '.9rem' }}>
-              {visibleBooks.map(book => {
-              const qty = cart[book.id] || 0;
-              return (
-                <div key={book.id} style={{
-                  border: '1px solid rgba(255,255,255,0.1)',
-                  borderRadius: 16,
-                  overflow: 'hidden',
-                  background: 'rgba(255,255,255,0.03)',
-                  display: 'flex',
-                  flexDirection: 'column'
-                }}>
-                  <img src={book.cover} alt={book.title} style={{ width: '100%', height: 160, objectFit: 'cover' }} />
-                  <div style={{ padding: '.8rem', display: 'flex', flexDirection: 'column', flex: 1 }}>
-                    <span style={{
-                      display: 'inline-block',
-                      width: 'fit-content',
-                      borderRadius: 999,
-                      border: '1px solid rgba(43,144,255,0.4)',
-                      color: '#9bccff',
-                      background: 'rgba(43,144,255,0.14)',
-                      fontSize: '.67rem',
-                      padding: '.15rem .45rem',
-                      marginBottom: '.4rem',
-                      fontWeight: 700
-                    }}>
-                      {book.category}
-                    </span>
-                    <h3 style={{ margin: 0, fontSize: '1rem' }}>{book.title}</h3>
-                    <p style={{ margin: '.2rem 0 .5rem', color: '#9db0c7', fontSize: '.82rem' }}>by {book.author}</p>
-                    <p style={{ margin: 0, color: '#c8d4e4', fontSize: '.82rem', minHeight: 44, flex: 1 }}>{book.blurb}</p>
-                    <div style={{ marginTop: '.8rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <strong style={{ color: '#61dafb' }}>{formatInr(book.price)}</strong>
-                      {qty === 0 ? (
-                        <button onClick={() => add(book.id)} style={btnSmall()}>
-                          <Plus size={14} /> Add
-                        </button>
-                      ) : (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '.4rem' }}>
-                          <button onClick={() => remove(book.id)} style={iconBtn()}><Minus size={14} /></button>
-                          <span style={{ minWidth: 18, textAlign: 'center' }}>{qty}</span>
-                          <button onClick={() => add(book.id)} style={iconBtn()}><Plus size={14} /></button>
-                        </div>
-                      )}
+              {visibleBooks.map((book) => {
+                const qty = cart[book.id] || 0;
+                return (
+                  <div
+                    key={book.id}
+                    onClick={() => setSelectedBook(book)}
+                    style={{
+                      border: '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: 16,
+                      overflow: 'hidden',
+                      background: 'rgba(255,255,255,0.03)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      cursor: 'pointer',
+                      position: 'relative'
+                    }}
+                  >
+                    {book.bestSeller && <Ribbon type="best">Best Seller</Ribbon>}
+                    {!book.bestSeller && book.isNew && <Ribbon type="new">New</Ribbon>}
+                    <img src={book.cover} alt={book.title} style={{ width: '100%', height: 160, objectFit: 'cover' }} />
+                    <div style={{ padding: '.8rem', display: 'flex', flexDirection: 'column', flex: 1 }}>
+                      <span
+                        style={{
+                          display: 'inline-block',
+                          width: 'fit-content',
+                          borderRadius: 999,
+                          border: '1px solid rgba(43,144,255,0.4)',
+                          color: '#9bccff',
+                          background: 'rgba(43,144,255,0.14)',
+                          fontSize: '.67rem',
+                          padding: '.15rem .45rem',
+                          marginBottom: '.4rem',
+                          fontWeight: 700
+                        }}
+                      >
+                        {book.category}
+                      </span>
+                      <h3 style={{ margin: 0, fontSize: '1rem' }}>{book.title}</h3>
+                      <p style={{ margin: '.2rem 0 .5rem', color: '#9db0c7', fontSize: '.82rem' }}>by {book.author}</p>
+                      <p style={{ margin: 0, color: '#c8d4e4', fontSize: '.82rem', minHeight: 44, flex: 1 }}>{book.blurb}</p>
+                      <div style={{ marginTop: '.8rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <strong style={{ color: '#61dafb' }}>{formatInr(book.price)}</strong>
+                        {qty === 0 ? (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              add(book.id);
+                            }}
+                            style={btnSmall()}
+                          >
+                            <Plus size={14} /> Add
+                          </button>
+                        ) : (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '.4rem' }}>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                remove(book.id);
+                              }}
+                              style={iconBtn()}
+                            >
+                              <Minus size={14} />
+                            </button>
+                            <span style={{ minWidth: 18, textAlign: 'center' }}>{qty}</span>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                add(book.id);
+                              }}
+                              style={iconBtn()}
+                            >
+                              <Plus size={14} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
-              );
+                );
               })}
               {!visibleBooks.length && (
-                <div style={{
-                  gridColumn: '1 / -1',
-                  textAlign: 'center',
-                  border: '1px dashed rgba(255,255,255,0.22)',
-                  borderRadius: 14,
-                  padding: '1.5rem',
-                  color: '#9db0c7'
-                }}>
+                <div
+                  style={{
+                    gridColumn: '1 / -1',
+                    textAlign: 'center',
+                    border: '1px dashed rgba(255,255,255,0.22)',
+                    borderRadius: 14,
+                    padding: '1.5rem',
+                    color: '#9db0c7'
+                  }}
+                >
                   No books found for this search/filter.
                 </div>
               )}
             </div>
           </div>
 
-          <aside style={{
-            border: '1px solid rgba(255,255,255,0.1)',
-            borderRadius: 16,
-            background: 'rgba(255,255,255,0.03)',
-            padding: '.9rem',
-            alignSelf: 'start',
-            position: 'sticky',
-            top: 16
-          }}>
+          <aside
+            style={{
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: 16,
+              background: 'rgba(255,255,255,0.03)',
+              padding: '.9rem',
+              alignSelf: 'start',
+              position: 'sticky',
+              top: 16
+            }}
+          >
             <h3 style={{ marginTop: 0, display: 'flex', alignItems: 'center', gap: '.4rem' }}>
               <ShoppingCart size={18} /> Cart
             </h3>
@@ -358,7 +581,7 @@ export default function MaintenanceEbook() {
               <p style={{ color: '#9db0c7', fontSize: '.9rem' }}>No ebooks selected yet.</p>
             ) : (
               <div style={{ display: 'grid', gap: '.6rem' }}>
-                {items.map(item => (
+                {items.map((item) => (
                   <div key={item.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '.45rem' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: '.5rem' }}>
                       <div>
@@ -367,7 +590,9 @@ export default function MaintenanceEbook() {
                           {formatInr(item.price)} x {item.qty}
                         </div>
                       </div>
-                      <button onClick={() => clearItem(item.id)} style={iconBtn()}><Trash2 size={13} /></button>
+                      <button onClick={() => clearItem(item.id)} style={iconBtn()}>
+                        <Trash2 size={13} />
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -416,6 +641,124 @@ export default function MaintenanceEbook() {
           </aside>
         </div>
       </div>
+
+      {selectedBook && (
+        <BookModal
+          book={selectedBook}
+          qty={cart[selectedBook.id] || 0}
+          onClose={() => setSelectedBook(null)}
+          onAdd={() => add(selectedBook.id)}
+          onRemove={() => remove(selectedBook.id)}
+        />
+      )}
+    </div>
+  );
+}
+
+function Ribbon({ type, children }) {
+  const isBest = type === 'best';
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        top: 10,
+        left: 10,
+        zIndex: 2,
+        fontSize: '.68rem',
+        fontWeight: 800,
+        padding: '.2rem .48rem',
+        borderRadius: 999,
+        color: '#fff',
+        background: isBest ? 'linear-gradient(135deg,#f59e0b,#ef4444)' : 'linear-gradient(135deg,#10b981,#3b82f6)',
+        border: '1px solid rgba(255,255,255,0.35)',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '.25rem'
+      }}
+    >
+      {isBest ? <Star size={11} /> : <Sparkles size={11} />}
+      {children}
+    </div>
+  );
+}
+
+function BookModal({ book, qty, onClose, onAdd, onRemove }) {
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(3,7,18,0.75)',
+        backdropFilter: 'blur(2px)',
+        display: 'grid',
+        placeItems: 'center',
+        padding: '1rem',
+        zIndex: 50
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: 'min(920px, 100%)',
+          border: '1px solid rgba(255,255,255,0.14)',
+          borderRadius: 18,
+          background: '#0f1624',
+          overflow: 'hidden'
+        }}
+      >
+        <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr' }}>
+          <img src={book.cover} alt={book.title} style={{ width: '100%', height: '100%', minHeight: 340, objectFit: 'cover' }} />
+          <div style={{ padding: '1rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '.5rem' }}>
+              <div>
+                <div style={{ display: 'flex', gap: '.4rem', marginBottom: '.35rem' }}>
+                  <span style={tagStyle()}>{book.category}</span>
+                  {book.bestSeller && <span style={tagStyle('best')}>Best Seller</span>}
+                  {!book.bestSeller && book.isNew && <span style={tagStyle('new')}>New</span>}
+                </div>
+                <h2 style={{ margin: 0 }}>{book.title}</h2>
+                <p style={{ margin: '.2rem 0 0', color: '#99b0cc' }}>by {book.author}</p>
+              </div>
+              <button onClick={onClose} style={iconBtn()}>
+                <X size={15} />
+              </button>
+            </div>
+
+            <p style={{ marginTop: '.9rem', color: '#d0dbee', lineHeight: 1.6 }}>{book.blurb}</p>
+
+            <div style={{ marginTop: '.8rem', display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0,1fr))', gap: '.6rem' }}>
+              <Meta label="Pages" value={book.pages} />
+              <Meta label="Language" value={book.language} />
+              <Meta label="Format" value={book.format} />
+            </div>
+
+            <div style={{ marginTop: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
+              <strong style={{ color: '#61dafb', fontSize: '1.2rem' }}>{formatInr(book.price)}</strong>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '.45rem' }}>
+                {qty > 0 && (
+                  <>
+                    <button onClick={onRemove} style={iconBtn()}><Minus size={14} /></button>
+                    <span style={{ minWidth: 20, textAlign: 'center' }}>{qty}</span>
+                  </>
+                )}
+                <button onClick={onAdd} style={btnSmall()}>
+                  <Plus size={14} /> {qty ? 'Add More' : 'Add to Cart'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Meta({ label, value }) {
+  return (
+    <div style={{ border: '1px solid rgba(255,255,255,0.15)', borderRadius: 10, padding: '.5rem .55rem' }}>
+      <div style={{ fontSize: '.7rem', color: '#8ea4c0', marginBottom: '.12rem' }}>{label}</div>
+      <div style={{ fontSize: '.84rem', color: '#e8f1ff', fontWeight: 700 }}>{value}</div>
     </div>
   );
 }
@@ -468,5 +811,39 @@ function payOption(active) {
     background: active ? 'rgba(43,144,255,0.12)' : 'transparent',
     fontSize: '.9rem',
     cursor: 'pointer'
+  };
+}
+
+function tagStyle(type) {
+  if (type === 'best') {
+    return {
+      borderRadius: 999,
+      border: '1px solid rgba(245,158,11,0.6)',
+      background: 'rgba(245,158,11,0.16)',
+      color: '#ffdca8',
+      fontSize: '.68rem',
+      padding: '.15rem .45rem',
+      fontWeight: 800
+    };
+  }
+  if (type === 'new') {
+    return {
+      borderRadius: 999,
+      border: '1px solid rgba(16,185,129,0.6)',
+      background: 'rgba(16,185,129,0.16)',
+      color: '#b9ffe6',
+      fontSize: '.68rem',
+      padding: '.15rem .45rem',
+      fontWeight: 800
+    };
+  }
+  return {
+    borderRadius: 999,
+    border: '1px solid rgba(43,144,255,0.6)',
+    background: 'rgba(43,144,255,0.16)',
+    color: '#b8d9ff',
+    fontSize: '.68rem',
+    padding: '.15rem .45rem',
+    fontWeight: 800
   };
 }

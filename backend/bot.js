@@ -1013,23 +1013,44 @@ async function handleCallbackQuery(callbackQuery) {
             return;
         }
 
-        // Send invite link to user
-        const channelUrl = process.env.TELEGRAM_CHANNEL_URL || '';
-        if (channelUrl) {
-            try {
-                await sendMessage(targetUserId,
-                    `🎉 <b>Payment Approved! Welcome to VIP!</b>\n\n` +
-                    `Your subscription is now active for <b>30 days</b>.\n\n` +
-                    `Tap below to join the exclusive channel:`,
-                    { inline_keyboard: [[{ text: '🔓 Join VIP Channel', url: channelUrl }]] }
-                );
-            } catch (e) {
-                await sendMessage(chatId, `⚠️ Approved in DB but couldn't DM user (they may not have started the bot): ${e.message}`);
-                return;
+        // Generate a one-time invite link (expires in 24h, single use)
+        const expireDate = Math.floor(Date.now() / 1000) + 24 * 60 * 60;
+        let inviteLink = '';
+        try {
+            const linkRes = await callTelegramAPI('createChatInviteLink', {
+                chat_id: CHANNEL_ID,
+                name: `VIP-${targetUserId}`,
+                expire_date: expireDate,
+                member_limit: 1
+            });
+            if (linkRes.ok && linkRes.result && linkRes.result.invite_link) {
+                inviteLink = linkRes.result.invite_link;
             }
+        } catch (e) {
+            await sendMessage(chatId, `❌ Could not generate invite link: ${e.message}`);
+            return;
         }
 
-        await sendMessage(chatId, `✅ Approved! Subscription created & invite sent to User ${targetUserId} (${targetUsername || 'no username'}).`);
+        if (!inviteLink) {
+            await sendMessage(chatId, `❌ Failed to generate invite link. Make sure the bot is an admin in the VIP channel.`);
+            return;
+        }
+
+        // Send one-time link to user
+        try {
+            await sendMessage(targetUserId,
+                `🎉 <b>Payment Approved! Welcome to VIP!</b>\n\n` +
+                `Your subscription is now active for <b>30 days</b>.\n\n` +
+                `⚠️ <b>Important:</b> The link below is <b>for you only</b> — it works once and expires in 24 hours. Do not share it.\n\n` +
+                `Tap below to join:`,
+                { inline_keyboard: [[{ text: '🔓 Join VIP Channel (1-time link)', url: inviteLink }]] }
+            );
+        } catch (e) {
+            await sendMessage(chatId, `⚠️ Approved in DB but couldn't DM user (they may not have started the bot): ${e.message}\n\nManual link: ${inviteLink}`);
+            return;
+        }
+
+        await sendMessage(chatId, `✅ Approved!\n\n👤 User: ${targetUsername || targetUserId}\n🔗 One-time link sent (expires 24h, single-use).\n📅 Sub active for 30 days.`);
 
     } else if (data.startsWith('reject_payment_') && isAdmin(userId)) {
         const targetUserId = data.split('_')[2];

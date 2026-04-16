@@ -31,6 +31,7 @@ const VIP_SUBSCRIPTION_AMOUNT = 399;
 const WELCOME_STORE_PATH = path.join(__dirname, 'welcome_msgs.json');
 const PAYMENT_STORE_PATH = path.join(__dirname, 'payment_settings.json');
 const PENDING_PROOF_PATH = path.join(__dirname, 'pending_proof.json');
+const WELCOME_SETTINGS_PATH = path.join(__dirname, 'welcome_settings.json');
 
 function loadWelcomeStore() {
     try {
@@ -56,6 +57,19 @@ function loadPaymentStore() {
 
 function savePaymentStore(data) {
     try { fs.writeFileSync(PAYMENT_STORE_PATH, JSON.stringify(data || {}, null, 2)); } catch (_) {}
+}
+
+function loadWelcomeSettings() {
+    try {
+        if (fs.existsSync(WELCOME_SETTINGS_PATH)) {
+            return JSON.parse(fs.readFileSync(WELCOME_SETTINGS_PATH, 'utf8'));
+        }
+    } catch (_) {}
+    return { vip: true, public: false }; // public off by default
+}
+
+function saveWelcomeSettings(data) {
+    try { fs.writeFileSync(WELCOME_SETTINGS_PATH, JSON.stringify(data, null, 2)); } catch (_) {}
 }
 
 function loadPendingProof() {
@@ -205,6 +219,8 @@ async function handleNewChatMember(update) {
     // --- PUBLIC CHANNEL: send welcome with website link ---
     if (matchesChannel(chatId, PUBLIC_CHANNEL_ID) || matchesChannel(chatUsername, PUBLIC_CHANNEL_ID)) {
         console.log(`[BOT] User @${username || userId} joined public channel`);
+        const welcomeSettings = loadWelcomeSettings();
+        if (!welcomeSettings.public) return; // welcome messages disabled for public channel
         const botStartUrl = cachedBotUsername ? `https://t.me/${cachedBotUsername}?start=public` : frontendUrl;
         try {
             const res = await sendMessage(chatId,
@@ -284,6 +300,8 @@ async function handleNewChatMember(update) {
     }
 
     // --- VIP WELCOME MESSAGE ---
+    const welcomeSettings = loadWelcomeSettings();
+    if (!welcomeSettings.vip) return; // welcome messages disabled for VIP channel
     const botStartUrl = cachedBotUsername ? `https://t.me/${cachedBotUsername}?start=vip` : frontendUrl;
     try {
         const res = await sendMessage(chatId,
@@ -967,6 +985,43 @@ async function handleCommand(message) {
         }
     }
 
+    else if (text.startsWith('/welcome')) {
+        const parts = text.split(' ');
+        const target = (parts[1] || '').toLowerCase(); // vip or public
+        const action = (parts[2] || '').toLowerCase(); // on or off
+        const settings = loadWelcomeSettings();
+
+        if (!target) {
+            // Show current status
+            await sendMessage(chatId,
+                `📢 <b>Welcome Message Status</b>\n\n` +
+                `VIP channel: ${settings.vip ? '✅ ON' : '❌ OFF'}\n` +
+                `Public channel: ${settings.public ? '✅ ON' : '❌ OFF'}\n\n` +
+                `<b>Commands:</b>\n` +
+                `/welcome vip on — enable VIP welcome\n` +
+                `/welcome vip off — disable VIP welcome\n` +
+                `/welcome public on — enable public welcome\n` +
+                `/welcome public off — disable public welcome`
+            );
+            return;
+        }
+
+        if (target !== 'vip' && target !== 'public') {
+            await sendMessage(chatId, '❌ Usage: /welcome vip on|off  or  /welcome public on|off');
+            return;
+        }
+        if (action !== 'on' && action !== 'off') {
+            await sendMessage(chatId, `❌ Usage: /welcome ${target} on|off`);
+            return;
+        }
+
+        settings[target] = action === 'on';
+        saveWelcomeSettings(settings);
+        await sendMessage(chatId,
+            `${action === 'on' ? '✅' : '❌'} Welcome messages for <b>${target.toUpperCase()} channel</b> turned <b>${action.toUpperCase()}</b>.`
+        );
+    }
+
     else if (text === '/help') {
         await sendMessage(chatId,
             `🤖 <b>Admin Commands</b>\n\n` +
@@ -1141,6 +1196,7 @@ async function handleCallbackQuery(callbackQuery) {
             `<b>⚙️ Management</b>\n` +
             `/extend &lt;user&gt; &lt;days&gt; — Add days to sub\n` +
             `/kick &lt;user&gt; — Kick &amp; cancel user\n` +
+            `/welcome — Toggle welcome messages on/off\n` +
             `/setqr — Upload/update VIP payment QR\n` +
             `/showqr — Preview saved VIP QR\n` +
             `/menu — Quick-action menu`
@@ -1308,6 +1364,7 @@ async function pollUpdates() {
             { command: 'kick', description: '👢 Kick & cancel a user' },
             { command: 'broadcast', description: '📢 DM all active subscribers' },
             { command: 'post', description: '📨 Post to VIP or public channel' },
+            { command: 'welcome', description: '📢 Toggle welcome messages on/off' },
             { command: 'setqr', description: '🖼 Upload VIP payment QR image' },
             { command: 'showqr', description: '🧾 Preview current VIP QR' },
             { command: 'help', description: '❓ All admin commands' },

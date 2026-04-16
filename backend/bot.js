@@ -561,6 +561,7 @@ async function handleCommand(message) {
                     [{ text: '🔴 Non-VIP Users', callback_data: 'admin_nonvip' }, { text: '🕐 Expired', callback_data: 'admin_expired' }],
                     [{ text: '📢 Post to VIP Channel', callback_data: 'admin_post_vip' }],
                     [{ text: '📣 Post to Public Channel', callback_data: 'admin_post_public' }],
+                    [{ text: '🔔 Toggle Welcome Messages', callback_data: 'admin_welcome' }],
                     [{ text: '❓ All Commands', callback_data: 'admin_help' }]
                 ]
             }
@@ -1171,6 +1172,31 @@ async function handleCallbackQuery(callbackQuery) {
         let msg = `🕐 <b>Expired/Cancelled (last 20)</b>\n\n`;
         for (const s of expired) msg += `• ${s.telegram_username || s.phone || `#${s.id}`} — ${s.status} (₹${s.amount})\n`;
         await sendMessage(chatId, msg);
+
+    } else if (data === 'admin_welcome' && isAdmin(userId)) {
+        const s = loadWelcomeSettings();
+        await sendMessage(chatId,
+            `🔔 <b>Welcome Messages</b>\n\n` +
+            `VIP channel: ${s.vip ? '✅ ON' : '❌ OFF'}\n` +
+            `Public channel: ${s.public ? '✅ ON' : '❌ OFF'}\n\n` +
+            `Tap to toggle:`,
+            { inline_keyboard: [
+                [{ text: `${s.vip ? '✅ VIP — ON' : '❌ VIP — OFF'} (tap to toggle)`, callback_data: 'toggle_welcome_vip' }],
+                [{ text: `${s.public ? '✅ Public — ON' : '❌ Public — OFF'} (tap to toggle)`, callback_data: 'toggle_welcome_public' }]
+            ]}
+        );
+
+    } else if (data === 'toggle_welcome_vip' && isAdmin(userId)) {
+        const s = loadWelcomeSettings();
+        s.vip = !s.vip;
+        saveWelcomeSettings(s);
+        await sendMessage(chatId, `${s.vip ? '✅' : '❌'} VIP welcome messages turned <b>${s.vip ? 'ON' : 'OFF'}</b>.`);
+
+    } else if (data === 'toggle_welcome_public' && isAdmin(userId)) {
+        const s = loadWelcomeSettings();
+        s.public = !s.public;
+        saveWelcomeSettings(s);
+        await sendMessage(chatId, `${s.public ? '✅' : '❌'} Public welcome messages turned <b>${s.public ? 'ON' : 'OFF'}</b>.`);
 
     } else if (data === 'admin_post_vip' && isAdmin(userId)) {
         await sendMessage(chatId, `📢 <b>Post to VIP Channel</b>\n\nSend your message using:\n<code>/post vip Your message here</code>\n\nSupports HTML formatting: <b>bold</b>, <i>italic</i>, <a href='...'>links</a>`);

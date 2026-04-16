@@ -30,6 +30,7 @@ const VIP_SUBSCRIPTION_AMOUNT = 399;
 // Persistent store for welcome messages so we can fix their button URLs on restart
 const WELCOME_STORE_PATH = path.join(__dirname, 'welcome_msgs.json');
 const PAYMENT_STORE_PATH = path.join(__dirname, 'payment_settings.json');
+const PENDING_PROOF_PATH = path.join(__dirname, 'pending_proof.json');
 
 function loadWelcomeStore() {
     try {
@@ -55,6 +56,36 @@ function loadPaymentStore() {
 
 function savePaymentStore(data) {
     try { fs.writeFileSync(PAYMENT_STORE_PATH, JSON.stringify(data || {}, null, 2)); } catch (_) {}
+}
+
+function loadPendingProof() {
+    try {
+        if (fs.existsSync(PENDING_PROOF_PATH)) {
+            return JSON.parse(fs.readFileSync(PENDING_PROOF_PATH, 'utf8'));
+        }
+    } catch (_) {}
+    return {};
+}
+
+function savePendingProof(data) {
+    try { fs.writeFileSync(PENDING_PROOF_PATH, JSON.stringify(data || {})); } catch (_) {}
+}
+
+function addPendingProof(userId) {
+    const d = loadPendingProof();
+    d[String(userId)] = Date.now();
+    savePendingProof(d);
+}
+
+function removePendingProof(userId) {
+    const d = loadPendingProof();
+    delete d[String(userId)];
+    savePendingProof(d);
+}
+
+function hasPendingProof(userId) {
+    const d = loadPendingProof();
+    return !!d[String(userId)];
 }
 
 function getVipEntryUrl(fallbackUrl = null) {
@@ -96,7 +127,7 @@ async function sendVipQrFlow(chatId, userId) {
             inline_keyboard: [[{ text: '📤 Send Payment Screenshot', callback_data: 'send_payment_proof' }]]
         }
     });
-    pendingPaymentProofUsers.set(String(userId), Date.now());
+    addPendingProof(userId);
 }
 
 async function sendVipPaymentOption(chatId) {
@@ -214,16 +245,21 @@ async function handleNewChatMember(update) {
         .limit(1)
         .maybeSingle();
 
-    if (!sub) {
-        const { data: subByUsername } = await supabase.from('prachi_subscriptions')
+    // Fallback: also check username without @ prefix (handles inconsistent storage)
+    let subByUsername = null;
+    if (!sub && username) {
+        const { data: fallback } = await supabase.from('prachi_subscriptions')
             .select('*')
-            .eq('telegram_username', username || '')
+            .eq('telegram_username', username)
             .eq('status', 'active')
             .gt('expires_at', now)
             .order('id', { ascending: false })
             .limit(1)
             .maybeSingle();
+        subByUsername = fallback;
+    }
 
+    if (!sub) {
         if (!subByUsername) {
             console.log(`[BOT] Unverified user joined VIP: ${username || userId} — kicking`);
             try {
@@ -353,7 +389,7 @@ async function handleSupportTicket(message) {
         return; 
     }
 
-    if (pendingPaymentProofUsers.has(String(userId))) {
+    if (hasPendingProof(userId)) {
         const hasPhoto = message.photo && message.photo.length > 0;
         const isImageDoc = message.document && String(message.document.mime_type || '').startsWith('image/');
         if (!hasPhoto && !isImageDoc) {
@@ -387,9 +423,13 @@ async function handleSupportTicket(message) {
             } catch (_) {}
         }
 
-        pendingPaymentProofUsers.delete(String(userId));
+        removePendingProof(userId);
         const userMention = message.from.username ? `@${message.from.username}` : (message.from.first_name || 'there');
-        await sendMessage(userId, `Thank you ${userMention}! We received your payment screenshot and will verify it shortly. You'll get the VIP invite link here once approved! 🎉`);
+        await sendMessage(userId,
+            `✅ <b>Screenshot Received!</b>\n\n` +
+            `Thank you ${userMention}! Your payment is being reviewed.\n\n` +
+            `⏳ You'll receive your <b>personal VIP invite link</b> here once approved — usually within a few hours.\n\n` +
+            `<i>Do not leave this chat open — you'll get a notification when it's ready!</i>`);
         return;
     }
 
@@ -435,6 +475,14 @@ async function handleCommand(message) {
                         [{ text: '🙋 Contact Support', callback_data: 'contact_support' }]
                     ]
                 }
+            );
+        } else if (text === '/help') {
+            await sendMessage(chatId,
+                `🤖 <b>Available Commands</b>\n\n` +
+                `/start — Main menu\n` +
+                `/status — Check your subscription\n` +
+                `/renew — Renew or get VIP access\n\n` +
+                `<i>Need help? Use the Contact Support button from /start.</i>`
             );
         } else if (text === '/renew') {
             const { data: sub } = await supabase.from('prachi_subscriptions')
@@ -609,6 +657,114 @@ async function handleCommand(message) {
             `💰 Active MRR: ₹${st.revenue.toLocaleString()}\n` +
             `💵 Lifetime revenue: ₹${st.totalRevenue.toLocaleString()}`
         );
+    }
+
+    else if (text.startsWith('/addvip ')) {
+        // /addvip @username [days]  — grant VIP access directly (no payment screenshot needed)
+        const parts = text.split(' ');
+        const target = (parts[1] || '').replace('@', '').trim();
+        const days = parseInt(parts[2]) || 30;
+        if (!target) {
+            await sendMessage(chatId, '❌ Usage: /addvip @username [days]\nExample: /addvip @johndoe 30');
+            return;
+        }
+        const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+        const expiryFormatted = new Date(expiresAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+
+        // Check if already active
+        const { data: existing } = await supabase.from('prachi_subscriptions')
+            .select('id, expires_at')
+            .or(`telegram_username.eq.@${target},telegram_username.eq.${target}`)
+            .eq('status', 'active')
+            .gt('expires_at', now)
+            .maybeSingle();
+
+        if (existing) {
+            await sendMessage(chatId, `⚠️ @${target} already has an active sub until ${new Date(existing.expires_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}.\nUse /extend @${target} ${days} instead.`);
+            return;
+        }
+
+        await supabase.from('prachi_subscriptions').insert({
+            telegram_username: `@${target}`,
+            phone: '',
+            transaction_id: `ADMIN_GRANT_${Date.now()}`,
+            amount: VIP_SUBSCRIPTION_AMOUNT,
+            plan: 'monthly',
+            status: 'active',
+            expires_at: expiresAt
+        });
+        await sendMessage(chatId, `✅ VIP access granted to @${target} for ${days} days.\n📅 Expires: ${expiryFormatted}`);
+    }
+
+    else if (text.startsWith('/approve ')) {
+        // /approve @username or /approve userId — generates invite link for user (no screenshot needed)
+        const target = text.replace('/approve ', '').trim().replace('@', '');
+        if (!target) {
+            await sendMessage(chatId, '❌ Usage: /approve @username\nThis creates a 1-time invite link and activates their subscription.');
+            return;
+        }
+
+        // Check existing or create subscription
+        const { data: existSub } = await supabase.from('prachi_subscriptions')
+            .select('id, telegram_user_id')
+            .or(`telegram_username.eq.@${target},telegram_username.eq.${target},telegram_user_id.eq.${target}`)
+            .eq('status', 'active')
+            .gt('expires_at', now)
+            .maybeSingle();
+
+        let targetUserId = existSub?.telegram_user_id || (/^\d+$/.test(target) ? target : null);
+
+        if (!existSub) {
+            const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+            await supabase.from('prachi_subscriptions').insert({
+                telegram_username: /^\d+$/.test(target) ? '' : `@${target}`,
+                telegram_user_id: /^\d+$/.test(target) ? target : null,
+                phone: '',
+                transaction_id: `APPROVE_${Date.now()}`,
+                amount: VIP_SUBSCRIPTION_AMOUNT,
+                plan: 'monthly',
+                status: 'active',
+                expires_at: expiresAt
+            });
+        }
+
+        // Generate one-time link
+        const expireDate = Math.floor(Date.now() / 1000) + 24 * 60 * 60;
+        let inviteLink = '';
+        try {
+            const linkRes = await callTelegramAPI('createChatInviteLink', {
+                chat_id: CHANNEL_ID,
+                name: `Approved-${target}`,
+                expire_date: expireDate,
+                member_limit: 1
+            });
+            if (linkRes.ok && linkRes.result) inviteLink = linkRes.result.invite_link;
+        } catch (e) {
+            await sendMessage(chatId, `❌ Could not generate link: ${e.message}`);
+            return;
+        }
+
+        if (!inviteLink) {
+            await sendMessage(chatId, '❌ Failed to generate invite link. Is the bot an admin in the VIP channel?');
+            return;
+        }
+
+        // Try to DM the user if we have their ID
+        if (targetUserId) {
+            try {
+                await sendMessage(targetUserId,
+                    `🎉 <b>You've been approved for VIP access!</b>\n\n` +
+                    `Your subscription is active for <b>30 days</b>.\n\n` +
+                    `⚠️ This link is <b>for you only</b> — single use, valid 24 hours:`,
+                    { inline_keyboard: [[{ text: '🔓 Join VIP Channel', url: inviteLink }]] }
+                );
+                await sendMessage(chatId, `✅ Approved @${target}!\n🔗 One-time link sent via DM.\n📅 Sub active 30 days.`);
+            } catch (e) {
+                await sendMessage(chatId, `✅ Subscription created.\n⚠️ Couldn't DM user — send them this link manually:\n\n${inviteLink}`);
+            }
+        } else {
+            await sendMessage(chatId, `✅ Subscription created for @${target}.\n\nSend them this link manually (1-use, 24h):\n\n${inviteLink}`);
+        }
     }
 
     else if (text.startsWith('/kick ')) {
@@ -995,6 +1151,21 @@ async function handleCallbackQuery(callbackQuery) {
         const targetUserId = parts[2];
         const targetUsername = parts.slice(3).join('_') || '';
 
+        // Check for existing active subscription (prevent double-approve)
+        const nowIso = new Date().toISOString();
+        const { data: existing } = await supabase.from('prachi_subscriptions')
+            .select('id, expires_at')
+            .eq('telegram_user_id', targetUserId)
+            .eq('status', 'active')
+            .gt('expires_at', nowIso)
+            .maybeSingle();
+
+        if (existing) {
+            const expiryStr = new Date(existing.expires_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+            await sendMessage(chatId, `⚠️ User ${targetUsername || targetUserId} already has an active subscription until ${expiryStr}.\n\nUse /extend if you want to add more days.`);
+            return;
+        }
+
         // Create active subscription in DB (30 days)
         const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
         const { error: insertErr } = await supabase.from('prachi_subscriptions').insert({
@@ -1063,19 +1234,7 @@ async function handleCallbackQuery(callbackQuery) {
         await sendMessage(chatId, `❌ Rejected. User ${targetUserId} has been notified.`);
 
     } else if (data === 'contact_support') {
-        await sendMessage(chatId, '📩 Please type your question or request below. An admin will reply to you as soon as possible!');
-    } else if (data === 'top_content') {
-        const channelInvite = process.env.TELEGRAM_CHANNEL_URL || 'https://t.me/c/YOUR_VIP_CHANNEL';
-        await sendMessage(chatId, 
-            "🔥 <b>Must-Watch VIP Content</b>\n\n" +
-            "Here are the most highly-rated exclusive videos from the vault. Enjoy!\n\n" +
-            `1️⃣ <a href='${channelInvite}'>Red Dress Exclusive</a>\n` +
-            `2️⃣ <a href='${channelInvite}'>Behind The Scenes Vlog</a>\n` +
-            `3️⃣ <a href='${channelInvite}'>Private Q&A Session</a>\n\n` +
-            "<i>(Note: You must be an active subscriber to view these links!)</i>"
-        );
-    } else if (data === 'rate_5' || data === 'rate_3') {
-        await sendMessage(chatId, "Thank you so much! 💖\n\nCould you write a quick 1-sentence review here in the chat? We'd love to share your feedback anonymously on our website.\n\nJust type it below and we will receive it:");
+        await sendMessage(chatId, '📩 Please type your question or request below. An admin will reply as soon as possible!');
     }
 }
 
@@ -1126,24 +1285,39 @@ async function pollUpdates() {
             }
         }
 
-        // Register bot commands so they appear in the Telegram menu
+        // Register user-facing commands (visible to all users)
         await callTelegramAPI('setMyCommands', {
             commands: [
-                { command: 'menu', description: '👑 Admin quick-action menu' },
-                { command: 'stats', description: '📊 Full stats — VIP, non-VIP, revenue' },
-                { command: 'subscribers', description: '📋 List active VIP subscribers' },
-                { command: 'nonvip', description: '🔴 List expired & cancelled users' },
-                { command: 'post', description: '📢 Post to channel: /post vip <msg> or /post public <msg>' },
-                { command: 'broadcast', description: '💬 DM all active subscribers' },
-                { command: 'search', description: '🔍 Look up a user by username/phone' },
-                { command: 'extend', description: '➕ Add days to a subscription' },
-                { command: 'kick', description: '👢 Kick & cancel a user' },
-                { command: 'expired', description: '🕐 List expired/cancelled subs' },
-                { command: 'setqr', description: '🖼️ Admin: set VIP payment QR image' },
-                { command: 'showqr', description: '🧾 Admin: preview current VIP QR' },
-                { command: 'help', description: '❓ Show all commands' },
+                { command: 'start', description: '🏠 Main menu' },
+                { command: 'status', description: '✅ Check my subscription status' },
+                { command: 'renew', description: '💳 Renew or get VIP access' },
             ]
         }).catch(() => {});
+
+        // Register admin commands scoped to each admin's private chat
+        const adminCommands = [
+            { command: 'menu', description: '👑 Quick-action menu' },
+            { command: 'stats', description: '📊 Full stats — VIP, revenue' },
+            { command: 'subscribers', description: '📋 Active VIP subscribers' },
+            { command: 'nonvip', description: '🔴 Expired & cancelled users' },
+            { command: 'expired', description: '🕐 Expired/cancelled (short list)' },
+            { command: 'search', description: '🔍 Look up a user' },
+            { command: 'approve', description: '✅ Approve user & send invite link' },
+            { command: 'addvip', description: '➕ Grant VIP access to user' },
+            { command: 'extend', description: '📅 Add days to a subscription' },
+            { command: 'kick', description: '👢 Kick & cancel a user' },
+            { command: 'broadcast', description: '📢 DM all active subscribers' },
+            { command: 'post', description: '📨 Post to VIP or public channel' },
+            { command: 'setqr', description: '🖼 Upload VIP payment QR image' },
+            { command: 'showqr', description: '🧾 Preview current VIP QR' },
+            { command: 'help', description: '❓ All admin commands' },
+        ];
+        for (const adminId of ADMIN_IDS) {
+            await callTelegramAPI('setMyCommands', {
+                commands: adminCommands,
+                scope: { type: 'chat', chat_id: Number(adminId) }
+            }).catch(() => {});
+        }
         console.log('[BOT] Commands registered');
     } catch (e) {
         console.error('[BOT] Failed to connect:', e.message);

@@ -269,6 +269,15 @@ async function handleNewChatMember(update) {
     // --- VIP CHANNEL: verify subscription then send welcome ---
     if (!matchesChannel(chatId, CHANNEL_ID)) return;
 
+    // If the join was approved/performed by an admin (native Telegram join request approval),
+    // skip subscription check entirely — the admin intentionally let them in.
+    const fromId = update.chat_member?.from?.id;
+    const adminApproved = fromId && isAdmin(String(fromId));
+    if (adminApproved) {
+        console.log(`[BOT] Admin ${fromId} approved user ${username || userId} — skipping subscription check`);
+        // Fall through to send welcome message below
+    } else {
+
     const now = new Date().toISOString();
 
     const { data: sub } = await supabase.from('prachi_subscriptions')
@@ -317,6 +326,8 @@ async function handleNewChatMember(update) {
         }
         console.log(`[BOT] Verified user joined VIP: ${username || userId} (sub #${sub.id})`);
     }
+
+    } // end of subscription check block (skipped when admin approved)
 
     // --- VIP WELCOME MESSAGE ---
     const welcomeSettings = loadWelcomeSettings();

@@ -215,7 +215,7 @@ app.get('/api/payment/status/:orderId', async (req, res) => {
             let url = 'https://t.me/placeholder';
             const { data: settings } = await supabase.from('prachi_settings').select('telegram_channel_url').order('id', { ascending: false }).limit(1).maybeSingle();
             if (settings) url = settings.telegram_channel_url;
-            if (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHANNEL_ID) {
+            if (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_VIP_PLUS_CHANNEL_ID) {
                 try {
                     const linkRes = await telegram.createInviteLink(86400);
                     if (linkRes.ok && linkRes.result) url = linkRes.result.invite_link;
@@ -564,7 +564,7 @@ app.put('/api/admin/subscriptions/:id/cancel', verifyToken, async (req, res) => 
     if (error) return res.status(500).json({ error: error.message });
     if (!sub) return res.status(404).json({ error: 'Subscription not found' });
 
-    if (sub.telegram_user_id && process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHANNEL_ID) {
+    if (sub.telegram_user_id && process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_VIP_PLUS_CHANNEL_ID) {
         try {
             await telegram.kickUser(sub.telegram_user_id);
             try {
@@ -592,7 +592,7 @@ app.put('/api/admin/subscriptions/:id/reactivate', verifyToken, async (req, res)
     if (error) return res.status(500).json({ error: error.message });
     if (!sub) return res.status(404).json({ error: 'Subscription not found' });
 
-    if (sub.telegram_user_id && process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHANNEL_ID) {
+    if (sub.telegram_user_id && process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_VIP_PLUS_CHANNEL_ID) {
         try {
             await telegram.unbanUser(sub.telegram_user_id);
         } catch (e) {
@@ -852,7 +852,7 @@ const postedMessages = [];
 app.post('/api/admin/post-poll', verifyToken, async (req, res) => {
     const { question, options, channel } = req.body;
     if (!question || !options || options.length < 2) return res.status(400).json({ error: 'Question and at least 2 options required' });
-    const channelId = channel === 'vip' ? process.env.TELEGRAM_CHANNEL_ID : process.env.TELEGRAM_PUBLIC_CHANNEL_ID;
+    const channelId = channel === 'vip' ? process.env.TELEGRAM_VIP_PLUS_CHANNEL_ID : process.env.TELEGRAM_PUBLIC_CHANNEL_ID;
     if (!channelId) return res.status(400).json({ error: 'Channel ID not configured' });
     try {
         const result = await telegram.createPoll(channelId, question, options);
@@ -909,8 +909,8 @@ app.get('/api/admin/channel-stats', verifyToken, async (req, res) => {
     const { callTelegramAPI } = require('./telegram');
     const stats = { vip: null, public: null };
     try {
-        if (process.env.TELEGRAM_CHANNEL_ID) {
-            const r = await callTelegramAPI('getChatMemberCount', { chat_id: process.env.TELEGRAM_CHANNEL_ID });
+        if (process.env.TELEGRAM_VIP_PLUS_CHANNEL_ID) {
+            const r = await callTelegramAPI('getChatMemberCount', { chat_id: process.env.TELEGRAM_VIP_PLUS_CHANNEL_ID });
             if (r.ok) stats.vip = r.result;
         }
     } catch (_) {}
@@ -927,7 +927,7 @@ app.get('/api/admin/channel-stats', verifyToken, async (req, res) => {
 app.post('/api/admin/invite-user', verifyToken, async (req, res) => {
     const { telegramUserId } = req.body;
     if (!telegramUserId) return res.status(400).json({ error: 'telegramUserId required' });
-    if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_CHANNEL_ID) {
+    if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_VIP_PLUS_CHANNEL_ID) {
         return res.status(400).json({ error: 'Telegram not configured' });
     }
     try {

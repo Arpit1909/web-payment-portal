@@ -1858,9 +1858,13 @@ export default function Admin() {
                                 </div>
                             </div>
                             <div className="admin-section-body" style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.7 }}>
-                                <p><strong style={{ color: 'var(--text-primary)' }}>Auto-expiry:</strong> Subscriptions auto-expire after 30 days. The system checks every hour and kicks expired users from the Telegram channel.</p>
-                                <p style={{ marginTop: '0.5rem' }}><strong style={{ color: 'var(--text-primary)' }}>Manual control:</strong> Use Cancel to immediately revoke access, or Reactivate to grant 30 more days.</p>
-                                <p style={{ marginTop: '0.5rem' }}><strong style={{ color: 'var(--text-primary)' }}>Renewal:</strong> Users must pay again each month to rejoin. They receive a notification when access is removed.</p>
+                                <p><strong style={{ color: 'var(--text-primary)' }}>📋 Two Plans:</strong></p>
+                                <p style={{ marginTop: '0.3rem', paddingLeft: '1rem' }}>• <strong style={{ color: '#EC4899' }}>VIP (₹299/mo)</strong> → Photos channel only</p>
+                                <p style={{ paddingLeft: '1rem' }}>• <strong style={{ color: '#F59E0B' }}>VIP+ (₹399/mo)</strong> → Photos + Videos channel</p>
+                                <p style={{ marginTop: '0.8rem' }}><strong style={{ color: 'var(--text-primary)' }}>⏱ Auto-expiry:</strong> Subscriptions auto-expire after 30 days. The system checks every hour and kicks expired users from their channel.</p>
+                                <p style={{ marginTop: '0.5rem' }}><strong style={{ color: 'var(--text-primary)' }}>🎛 Manual control:</strong> Cancel kicks from the matching channel (VIP or VIP+ based on plan). Reactivate grants 30 more days. Delete permanently removes the record.</p>
+                                <p style={{ marginTop: '0.5rem' }}><strong style={{ color: 'var(--text-primary)' }}>💰 Revenue:</strong> <b>MRR</b> = active subs only. <b>Net Revenue</b> = lifetime minus cancellations. <b>Gross</b> = all-time including cancellations (shown as subtitle).</p>
+                                <p style={{ marginTop: '0.5rem' }}><strong style={{ color: 'var(--text-primary)' }}>🔁 Renewal:</strong> Users pay again each month to rejoin. They receive a DM notification when access is removed.</p>
                             </div>
                         </div>
                     </>
@@ -1953,17 +1957,46 @@ export default function Admin() {
                             <div className="admin-section-header">
                                 <div className="admin-section-title">
                                     <MessageSquare size={16} color="var(--text-secondary)" />
-                                    📤 Smart Content Routing (Photos & Videos)
+                                    📤 Smart Content Routing — How It Works
                                 </div>
                             </div>
                             <div className="admin-section-body" style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.7 }}>
-                                <p><strong style={{ color: 'var(--text-primary)' }}>For media with smart routing</strong>, use the Telegram bot DM:</p>
-                                <ul style={{ marginTop: '0.6rem', paddingLeft: '1.2rem' }}>
-                                    <li><strong style={{ color: '#EC4899' }}>📸 Photo</strong> → Full to VIP + VIP+, blurred to Public</li>
-                                    <li><strong style={{ color: '#F59E0B' }}>🎬 Video</strong> → Full to VIP+ only, blurred teaser to VIP (₹299) + Public</li>
-                                    <li><strong style={{ color: 'var(--gold)' }}>🖼 Album / Carousel (up to 10)</strong> → Send multiple as one group, bot asks routing</li>
-                                </ul>
-                                <p style={{ marginTop: '0.8rem' }}>Just DM the bot with your photo/video/album and it will ask you how to distribute it.</p>
+                                <p style={{ marginBottom: '0.6rem' }}>Two ways to post content with smart distribution across all 3 channels:</p>
+
+                                <p style={{ marginTop: '0.8rem', marginBottom: '0.3rem' }}><strong style={{ color: 'var(--gold)' }}>1️⃣ Admin Panel — Gallery Upload</strong></p>
+                                <p style={{ paddingLeft: '1rem' }}>Upload a photo/video → select <b>"🎯 Smart Route"</b> → Save. Auto-routes to all channels.</p>
+
+                                <p style={{ marginTop: '0.8rem', marginBottom: '0.3rem' }}><strong style={{ color: 'var(--gold)' }}>2️⃣ Telegram Bot DM (fastest)</strong></p>
+                                <p style={{ paddingLeft: '1rem' }}>Send a photo / video / album to the bot → it asks how to route → tap to distribute.</p>
+
+                                <div style={{ marginTop: '1rem', padding: '0.8rem', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', border: '1px solid var(--card-border)' }}>
+                                    <p style={{ fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.6rem' }}>📋 Exact Routing Rules</p>
+
+                                    <div style={{ marginBottom: '0.7rem' }}>
+                                        <p style={{ color: '#EC4899', fontWeight: 600 }}>📸 Photo:</p>
+                                        <p style={{ paddingLeft: '1rem' }}>• 🔥 VIP+ (₹399) → <b>Full</b></p>
+                                        <p style={{ paddingLeft: '1rem' }}>• 📸 VIP (₹299) → <b>Full</b></p>
+                                        <p style={{ paddingLeft: '1rem' }}>• 📣 Public → <b>Blurred teaser</b> + "Join VIP" button</p>
+                                    </div>
+
+                                    <div style={{ marginBottom: '0.7rem' }}>
+                                        <p style={{ color: '#F59E0B', fontWeight: 600 }}>🎬 Video:</p>
+                                        <p style={{ paddingLeft: '1rem' }}>• 🔥 VIP+ (₹399) → <b>Full video</b></p>
+                                        <p style={{ paddingLeft: '1rem' }}>• 📸 VIP (₹299) → <b>Blurred video teaser</b> + "Upgrade" button</p>
+                                        <p style={{ paddingLeft: '1rem' }}>• 📣 Public → <b>Blurred teaser</b> + "Join VIP" button</p>
+                                    </div>
+
+                                    <div>
+                                        <p style={{ color: '#38BDF8', fontWeight: 600 }}>🖼 Album / Carousel (up to 10 items):</p>
+                                        <p style={{ paddingLeft: '1rem' }}>• 🔥 VIP+ (₹399) → <b>Full album</b> (photos + videos together)</p>
+                                        <p style={{ paddingLeft: '1rem' }}>• 📸 VIP (₹299) → <b>Photos full</b> · videos shown as <b>blurred thumbnails</b></p>
+                                        <p style={{ paddingLeft: '1rem' }}>• 📣 Public → <b>All blurred</b> + upgrade button below</p>
+                                    </div>
+                                </div>
+
+                                <p style={{ marginTop: '0.8rem', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                                    💡 <b>Tip:</b> Use the compose boxes above for plain text announcements. Use Smart Route (Gallery upload) or Bot DM for media.
+                                </p>
                             </div>
                         </div>
                     </>

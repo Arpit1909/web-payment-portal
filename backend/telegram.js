@@ -215,15 +215,23 @@ async function smartDistributePhoto(photoFileId, fullCaption, teaserCaption, upg
     // Full photo → VIP+ channel (₹399)
     if (CHANNEL_ID) {
         try {
-            results.vipPlus = await callTelegramAPI('sendPhoto', { chat_id: CHANNEL_ID, photo: photoFileId, caption: fullCaption, parse_mode: 'HTML' });
+            const r = await callTelegramAPI('sendPhoto', { chat_id: CHANNEL_ID, photo: photoFileId, caption: fullCaption, parse_mode: 'HTML' });
+            if (r && r.ok) results.vipPlus = r;
+            else results.vipPlusErr = (r && r.description) || 'unknown error';
         } catch (e) { results.vipPlusErr = e.message; }
+    } else {
+        results.vipPlusErr = 'TELEGRAM_VIP_PLUS_CHANNEL_ID not set in .env';
     }
 
     // Full photo → VIP channel (₹299)
     if (VIP_ONLY_CHANNEL_ID) {
         try {
-            results.vip = await callTelegramAPI('sendPhoto', { chat_id: VIP_ONLY_CHANNEL_ID, photo: photoFileId, caption: fullCaption, parse_mode: 'HTML' });
+            const r = await callTelegramAPI('sendPhoto', { chat_id: VIP_ONLY_CHANNEL_ID, photo: photoFileId, caption: fullCaption, parse_mode: 'HTML' });
+            if (r && r.ok) results.vip = r;
+            else results.vipErr = (r && r.description) || 'unknown error';
         } catch (e) { results.vipErr = e.message; }
+    } else {
+        results.vipErr = 'TELEGRAM_VIP_CHANNEL_ID not set in .env';
     }
 
     // Blur teaser → public channel
@@ -232,8 +240,12 @@ async function smartDistributePhoto(photoFileId, fullCaption, teaserCaption, upg
             const markup = upgradeMarkup || null;
             const d = { chat_id: publicChannelId, photo: photoFileId, caption: teaserCaption, parse_mode: 'HTML', has_spoiler: true };
             if (markup) d.reply_markup = markup;
-            results.public = await callTelegramAPI('sendPhoto', d);
+            const r = await callTelegramAPI('sendPhoto', d);
+            if (r && r.ok) results.public = r;
+            else results.publicErr = (r && r.description) || 'unknown error';
         } catch (e) { results.publicErr = e.message; }
+    } else {
+        results.publicErr = 'TELEGRAM_PUBLIC_CHANNEL_ID not set in .env';
     }
 
     return results;
@@ -248,28 +260,48 @@ async function smartDistributeVideo(videoFileId, thumbFileId, fullCaption, tease
         try {
             const d = { chat_id: CHANNEL_ID, video: videoFileId, caption: fullCaption, parse_mode: 'HTML' };
             if (thumbFileId) d.thumbnail = thumbFileId;
-            results.vipPlus = await callTelegramAPI('sendVideo', d);
+            const r = await callTelegramAPI('sendVideo', d);
+            if (r && r.ok) results.vipPlus = r;
+            else results.vipPlusErr = (r && r.description) || 'unknown error';
         } catch (e) { results.vipPlusErr = e.message; }
+    } else {
+        results.vipPlusErr = 'TELEGRAM_VIP_PLUS_CHANNEL_ID not set in .env';
     }
 
     // Blur photo teaser (using thumbnail or first frame) → VIP channel (₹299)
-    if (VIP_ONLY_CHANNEL_ID && thumbFileId) {
-        try {
-            const markup = upgradeMarkup || null;
-            const d = { chat_id: VIP_ONLY_CHANNEL_ID, photo: thumbFileId, caption: teaserCaption, parse_mode: 'HTML', has_spoiler: true };
-            if (markup) d.reply_markup = markup;
-            results.vip = await callTelegramAPI('sendPhoto', d);
-        } catch (e) { results.vipErr = e.message; }
+    if (VIP_ONLY_CHANNEL_ID) {
+        if (!thumbFileId) {
+            results.vipErr = 'No video thumbnail available for blur teaser';
+        } else {
+            try {
+                const markup = upgradeMarkup || null;
+                const d = { chat_id: VIP_ONLY_CHANNEL_ID, photo: thumbFileId, caption: teaserCaption, parse_mode: 'HTML', has_spoiler: true };
+                if (markup) d.reply_markup = markup;
+                const r = await callTelegramAPI('sendPhoto', d);
+                if (r && r.ok) results.vip = r;
+                else results.vipErr = (r && r.description) || 'unknown error';
+            } catch (e) { results.vipErr = e.message; }
+        }
+    } else {
+        results.vipErr = 'TELEGRAM_VIP_CHANNEL_ID not set in .env';
     }
 
     // Blur photo teaser → public channel
-    if (publicChannelId && thumbFileId) {
-        try {
-            const markup = upgradeMarkup || null;
-            const d = { chat_id: publicChannelId, photo: thumbFileId, caption: teaserCaption, parse_mode: 'HTML', has_spoiler: true };
-            if (markup) d.reply_markup = markup;
-            results.public = await callTelegramAPI('sendPhoto', d);
-        } catch (e) { results.publicErr = e.message; }
+    if (publicChannelId) {
+        if (!thumbFileId) {
+            results.publicErr = 'No video thumbnail available for blur teaser';
+        } else {
+            try {
+                const markup = upgradeMarkup || null;
+                const d = { chat_id: publicChannelId, photo: thumbFileId, caption: teaserCaption, parse_mode: 'HTML', has_spoiler: true };
+                if (markup) d.reply_markup = markup;
+                const r = await callTelegramAPI('sendPhoto', d);
+                if (r && r.ok) results.public = r;
+                else results.publicErr = (r && r.description) || 'unknown error';
+            } catch (e) { results.publicErr = e.message; }
+        }
+    } else {
+        results.publicErr = 'TELEGRAM_PUBLIC_CHANNEL_ID not set in .env';
     }
 
     return results;

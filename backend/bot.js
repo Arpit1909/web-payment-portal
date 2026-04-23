@@ -786,6 +786,38 @@ async function handleCommand(message) {
         return;
     }
 
+    if (text === '/channels' || text === '/diag') {
+        let msg = `🔧 <b>CHANNEL DIAGNOSTICS</b>\n━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+        const check = async (label, channelId, envKey) => {
+            if (!channelId) return `❌ <b>${label}</b>\n  └ <code>${envKey}</code> not set in .env\n\n`;
+            let section = `• <b>${label}</b>\n  ├ ID: <code>${channelId}</code>\n`;
+            try {
+                const info = await callTelegramAPI('getChat', { chat_id: channelId });
+                if (!info.ok) return section + `  └ ❌ getChat failed: ${info.description}\n\n`;
+                section += `  ├ Name: ${info.result.title || '(no title)'}\n`;
+                const me = await callTelegramAPI('getChatMember', { chat_id: channelId, user_id: (await callTelegramAPI('getMe')).result.id });
+                if (!me.ok) return section + `  └ ❌ getChatMember failed: ${me.description}\n\n`;
+                const status = me.result.status;
+                const canPost = me.result.can_post_messages;
+                const canInvite = me.result.can_invite_users;
+                section += `  ├ Bot status: ${status}\n`;
+                section += `  ├ Can post: ${canPost ? '✅' : '❌'}\n`;
+                section += `  └ Can invite: ${canInvite ? '✅' : '❌'}\n\n`;
+                return section;
+            } catch (e) {
+                return section + `  └ ❌ Error: ${e.message}\n\n`;
+            }
+        };
+
+        msg += await check('📣 Public Channel', PUBLIC_CHANNEL_ID, 'TELEGRAM_PUBLIC_CHANNEL_ID');
+        msg += await check('📸 VIP Channel (₹299)', VIP_ONLY_CHANNEL_ID, 'TELEGRAM_VIP_CHANNEL_ID');
+        msg += await check('🔥 VIP+ Channel (₹399)', VIP_PLUS_CHANNEL_ID, 'TELEGRAM_VIP_PLUS_CHANNEL_ID');
+
+        await sendMessage(chatId, msg);
+        return;
+    }
+
     if (text === '/cleanchat' || text === '/clearchat') {
         const parts = text.split(' ');
         const requestedRange = parseInt(parts[1]);
@@ -1703,9 +1735,11 @@ async function handleCallbackQuery(callbackQuery) {
         const upgradeMarkup = { inline_keyboard: [[{ text: '🔓 Get VIP Access', url: vipJoinUrl }]] };
         try {
             const r = await smartDistributePhoto(pending.fileId, pending.caption || '', teaserCaption, upgradeMarkup);
-            const ok = [r.vipPlus?.ok && 'VIP+', r.vip?.ok && 'VIP', r.public?.ok && 'Public'].filter(Boolean);
-            const fail = [r.vipPlusErr && 'VIP+', r.vipErr && 'VIP', r.publicErr && 'Public'].filter(Boolean);
-            await sendMessage(chatId, `✅ <b>Photo distributed!</b>\n\nPosted to: ${ok.join(', ') || 'none'}${fail.length ? `\nFailed: ${fail.join(', ')}` : ''}`);
+            let msg = `📸 <b>Photo Distribution Result</b>\n\n`;
+            msg += r.vipPlus?.ok ? `✅ VIP+ (₹399): Posted\n` : `❌ VIP+ (₹399): ${r.vipPlusErr || 'failed'}\n`;
+            msg += r.vip?.ok     ? `✅ VIP (₹299):  Posted\n` : `❌ VIP (₹299):  ${r.vipErr || 'failed'}\n`;
+            msg += r.public?.ok  ? `✅ Public:      Posted (blur)\n` : `❌ Public:      ${r.publicErr || 'failed'}\n`;
+            await sendMessage(chatId, msg);
         } catch (e) {
             await sendMessage(chatId, `❌ Distribution failed: ${e.message}`);
         }
@@ -1720,9 +1754,11 @@ async function handleCallbackQuery(callbackQuery) {
         const upgradeMarkup = { inline_keyboard: [[{ text: '🔥 Upgrade to VIP+', url: vipJoinUrl }]] };
         try {
             const r = await smartDistributeVideo(pending.fileId, pending.thumbFileId, pending.caption || '', teaserCaption, upgradeMarkup);
-            const ok = [r.vipPlus?.ok && 'VIP+', r.vip?.ok && 'VIP (blur)', r.public?.ok && 'Public (blur)'].filter(Boolean);
-            const fail = [r.vipPlusErr && 'VIP+', r.vipErr && 'VIP', r.publicErr && 'Public'].filter(Boolean);
-            await sendMessage(chatId, `✅ <b>Video distributed!</b>\n\nPosted to: ${ok.join(', ') || 'none'}${fail.length ? `\nFailed: ${fail.join(', ')}` : ''}`);
+            let msg = `🎬 <b>Video Distribution Result</b>\n\n`;
+            msg += r.vipPlus?.ok ? `✅ VIP+ (₹399): Posted (full)\n` : `❌ VIP+ (₹399): ${r.vipPlusErr || 'failed'}\n`;
+            msg += r.vip?.ok     ? `✅ VIP (₹299):  Posted (blur teaser)\n` : `❌ VIP (₹299):  ${r.vipErr || 'failed'}\n`;
+            msg += r.public?.ok  ? `✅ Public:      Posted (blur teaser)\n` : `❌ Public:      ${r.publicErr || 'failed'}\n`;
+            await sendMessage(chatId, msg);
         } catch (e) {
             await sendMessage(chatId, `❌ Distribution failed: ${e.message}`);
         }
@@ -1987,6 +2023,7 @@ async function pollUpdates() {
             { command: 'welcome', description: '📢 Toggle welcome messages on/off' },
             { command: 'setqr', description: '🖼 Upload payment QR image' },
             { command: 'showqr', description: '🧾 Preview current QR' },
+            { command: 'channels', description: '🔧 Diagnose channel IDs & bot permissions' },
             { command: 'cleanchat', description: '🧹 Bulk-clean old bot messages (48h limit)' },
             { command: 'help', description: '❓ All admin commands' },
         ];

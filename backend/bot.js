@@ -541,7 +541,10 @@ async function handleSupportTicket(message) {
                     `📸 Photos: ${photoCount}\n` +
                     `🎬 Videos: ${videoCount}\n` +
                     `<b>Caption:</b> ${entry.caption || '(none)'}\n\n` +
-                    `Distribute as a carousel? Photos go full to VIP+VIP+, videos full to VIP+ only. Public gets blurred thumbnails.`,
+                    `Distribute as a carousel?\n` +
+                    `• VIP+ (₹399): Full photos & videos\n` +
+                    `• VIP (₹299): Photos only (videos skipped)\n` +
+                    `• Public: Blurred teasers`,
                     { inline_keyboard: [
                         [{ text: '🖼 Route as Album', callback_data: 'smart_route_album' }],
                         [{ text: '🚫 Cancel', callback_data: 'smart_cancel' }]
@@ -572,13 +575,13 @@ async function handleSupportTicket(message) {
             const thumbFileId = message.video.thumbnail ? message.video.thumbnail.file_id : '';
             const caption = message.caption || '';
             awaitingSmartPost.set(String(userId), { type: 'video', fileId, thumbFileId, caption });
-            const thumbWarning = thumbFileId ? '' : '\n\n⚠️ <i>No thumbnail detected — VIP channel and public will not get a blur teaser unless thumbnail exists.</i>';
+            const thumbWarning = thumbFileId ? '' : '\n\n⚠️ <i>No thumbnail detected — public blur teaser will be skipped.</i>';
             await sendMessage(userId,
                 `🎬 <b>Video received!</b>\n\n` +
                 `<b>Caption:</b> ${caption || '(none)'}\n\n` +
-                `How would you like to distribute it?${thumbWarning}`,
+                `Route as video? VIP+ full · Public blur teaser · VIP (photos-only) skipped.${thumbWarning}`,
                 { inline_keyboard: [
-                    [{ text: '🎬 Route as Video (VIP+ full · VIP blur · Public blur)', callback_data: 'smart_route_video' }],
+                    [{ text: '🎬 Route as Video (VIP+ full · Public blur)', callback_data: 'smart_route_video' }],
                     [{ text: '🚫 Cancel', callback_data: 'smart_cancel' }]
                 ]}
             );
@@ -1799,7 +1802,7 @@ async function handleCallbackQuery(callbackQuery) {
             const r = await smartDistributeVideo(pending.fileId, pending.thumbFileId, pending.caption || '', teaserCaption, upgradeMarkup);
             let msg = `🎬 <b>Video Distribution Result</b>\n\n`;
             msg += r.vipPlus?.ok ? `✅ VIP+ (₹399): Posted (full)\n` : `❌ VIP+ (₹399): ${r.vipPlusErr || 'failed'}\n`;
-            msg += r.vip?.ok     ? `✅ VIP (₹299):  Posted (blur teaser)\n` : `❌ VIP (₹299):  ${r.vipErr || 'failed'}\n`;
+            msg += `⏭ VIP (₹299):  Skipped (photos-only channel)\n`;
             msg += r.public?.ok  ? `✅ Public:      Posted (blur teaser)\n` : `❌ Public:      ${r.publicErr || 'failed'}\n`;
             await sendMessage(chatId, msg);
         } catch (e) {
@@ -1839,11 +1842,12 @@ async function handleCallbackQuery(callbackQuery) {
             `• Blurred teaser → Public\n\n` +
             `🎬 <b>Video routing:</b>\n` +
             `• Full → VIP+ (₹399) only\n` +
-            `• Blurred thumbnail → VIP (₹299) + Public\n\n` +
+            `• Blurred thumbnail → Public\n` +
+            `• VIP (₹299) skipped — photos-only channel\n\n` +
             `🖼 <b>Album / Carousel (up to 10 items):</b>\n` +
-            `• Photos: full to both VIP channels\n` +
-            `• Videos: full to VIP+ only; blur thumbs to VIP+public\n` +
-            `• Public sees full album blurred\n\n` +
+            `• VIP+ (₹399): full photos & videos\n` +
+            `• VIP (₹299): photos only (videos skipped)\n` +
+            `• Public: blurred teasers\n\n` +
             `<i>Send your content now 👇</i>`
         );
 

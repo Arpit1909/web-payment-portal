@@ -1523,8 +1523,8 @@ export default function Admin() {
                                     <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                                         {[
                                             { value: 'none', label: '🚫 Don\'t Post' },
-                                            { value: 'vip', label: '💎 VIP Channel' },
-                                            { value: 'public', label: '📢 Public Channel' },
+                                            { value: 'vip', label: '🎯 Smart Route (VIP + VIP+ + Public blur)' },
+                                            { value: 'public', label: '📢 Public Only' },
                                         ].map(opt => (
                                             <button
                                                 key={opt.value}
@@ -1544,13 +1544,14 @@ export default function Admin() {
                                         ))}
                                     </div>
                                     {postDestination === 'vip' && (
-                                        <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
-                                            Posts actual content to VIP channel + auto blurred teaser to public channel
+                                        <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.4rem', lineHeight: 1.5 }}>
+                                            📸 <b>Photo:</b> Full to VIP (₹299) + VIP+ (₹399) · Blurred teaser to Public<br/>
+                                            🎬 <b>Video:</b> Full to VIP+ only · Blurred teaser to Public · VIP (₹299) skipped
                                         </p>
                                     )}
                                     {postDestination === 'public' && (
                                         <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
-                                            Posts content to public channel without blur
+                                            Posts content to public channel only (no blur)
                                         </p>
                                     )}
                                 </div>
@@ -1959,7 +1960,7 @@ export default function Admin() {
                                 <p><strong style={{ color: 'var(--text-primary)' }}>For media with smart routing</strong>, use the Telegram bot DM:</p>
                                 <ul style={{ marginTop: '0.6rem', paddingLeft: '1.2rem' }}>
                                     <li><strong style={{ color: '#EC4899' }}>📸 Photo</strong> → Full to VIP + VIP+, blurred to Public</li>
-                                    <li><strong style={{ color: '#F59E0B' }}>🎬 Video</strong> → Full to VIP+ only, blurred thumbnail to VIP + Public</li>
+                                    <li><strong style={{ color: '#F59E0B' }}>🎬 Video</strong> → Full to VIP+ only, blurred thumbnail to Public (VIP skipped — photos only)</li>
                                     <li><strong style={{ color: 'var(--gold)' }}>🖼 Album / Carousel (up to 10)</strong> → Send multiple as one group, bot asks routing</li>
                                 </ul>
                                 <p style={{ marginTop: '0.8rem' }}>Just DM the bot with your photo/video/album and it will ask you how to distribute it.</p>

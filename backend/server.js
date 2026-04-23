@@ -408,23 +408,51 @@ app.post('/api/admin/previews', verifyToken, async (req, res) => {
         (async () => {
             try {
                 if (dest === 'vip') {
-                    // --- Post actual content to VIP channel ---
+                    console.log(`[POST-SMART] Starting smart-route: type=${type}, isImage=${isImage}, mediaUrl=${mediaUrl}`);
+                    // --- Post actual content to VIP+ channel (always) ---
                     if (isImage && mediaUrl) {
                         try {
-                            await telegram.sendPhotoToVipChannel(mediaUrl, vipPostCaption);
+                            const r = await telegram.sendPhotoToVipChannel(mediaUrl, vipPostCaption);
+                            if (r && !r.ok) console.error('[POST-VIPPLUS] Photo API error:', r.description);
+                            else console.log('[POST-VIPPLUS] ✅ Photo posted to VIP+ channel');
                         } catch (e) {
-                            console.error('[POST-VIP] Photo failed, sending text:', e.message);
-                            await telegram.postToVipChannel(vipPostCaption).catch(() => {});
+                            console.error('[POST-VIPPLUS] Photo failed, sending text:', e.message);
+                            await telegram.postToVipChannel(vipPostCaption).catch((err) => console.error('[POST-VIPPLUS] Text fallback failed:', err.message));
                         }
                     } else if (!isImage && mediaUrl) {
                         try {
-                            await telegram.sendVideoToVipChannel(mediaUrl, vipPostCaption);
+                            const r = await telegram.sendVideoToVipChannel(mediaUrl, vipPostCaption);
+                            if (r && !r.ok) console.error('[POST-VIPPLUS] Video API error:', r.description);
+                            else console.log('[POST-VIPPLUS] ✅ Video posted to VIP+ channel');
                         } catch (e) {
-                            console.error('[POST-VIP] Video failed, sending text:', e.message);
-                            await telegram.postToVipChannel(vipPostCaption).catch(() => {});
+                            console.error('[POST-VIPPLUS] Video failed, sending text:', e.message);
+                            await telegram.postToVipChannel(vipPostCaption).catch((err) => console.error('[POST-VIPPLUS] Text fallback failed:', err.message));
                         }
                     } else {
-                        await telegram.postToVipChannel(vipPostCaption).catch(() => {});
+                        await telegram.postToVipChannel(vipPostCaption).catch((err) => console.error('[POST-VIPPLUS] Text post failed:', err.message));
+                    }
+
+                    // --- Post photo to VIP channel (₹299 photos-only) ---
+                    // Videos skip this channel entirely (VIP is photos-only)
+                    if (process.env.TELEGRAM_VIP_CHANNEL_ID) {
+                        if (isImage && mediaUrl) {
+                            try {
+                                const r = await telegram.callTelegramAPI('sendPhoto', {
+                                    chat_id: process.env.TELEGRAM_VIP_CHANNEL_ID,
+                                    photo: mediaUrl,
+                                    caption: vipPostCaption,
+                                    parse_mode: 'HTML'
+                                });
+                                if (r && !r.ok) console.error('[POST-VIP299] Photo API error:', r.description);
+                                else console.log('[POST-VIP299] ✅ Photo posted to VIP channel');
+                            } catch (e) {
+                                console.error('[POST-VIP299] Photo failed:', e.message);
+                            }
+                        } else {
+                            console.log('[POST-VIP299] Skipping video — VIP channel is photos-only');
+                        }
+                    } else {
+                        console.warn('[POST-VIP299] TELEGRAM_VIP_CHANNEL_ID not set, skipping VIP ₹299 post');
                     }
 
                     // --- DM all active subscribers: new content alert ---

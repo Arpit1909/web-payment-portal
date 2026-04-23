@@ -1718,7 +1718,7 @@ export default function Admin() {
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                {subscriptions.map(sub => {
+                                                {subscriptions.map((sub, idx) => {
                                                     const isActive = sub.status === 'active' && new Date(sub.expires_at) > new Date();
                                                     const isExpired = sub.status === 'expired' || (sub.status === 'active' && new Date(sub.expires_at) <= new Date());
                                                     const statusColor = isActive ? 'var(--green)' : sub.status === 'cancelled' ? 'var(--rose)' : 'var(--gold)';
@@ -1726,7 +1726,7 @@ export default function Admin() {
 
                                                     return (
                                                         <tr key={sub.id} style={{ borderBottom: '1px solid var(--card-border)' }}>
-                                                            <td style={{ padding: '0.6rem', color: 'var(--text-muted)' }}>{sub.id}</td>
+                                                            <td style={{ padding: '0.6rem', color: 'var(--text-muted)' }}>{idx + 1}</td>
                                                             <td style={{ padding: '0.6rem' }}>
                                                                 <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
                                                                     {sub.telegram_username || 'N/A'}
